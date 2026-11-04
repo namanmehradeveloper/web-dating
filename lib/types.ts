@@ -1,0 +1,28 @@
+export type ItemList<T> = { items: T[]; nextCursor?: string | null; total?: number };
+export type Session = { accessToken: string; refreshToken: string; userId: string };
+export type Photo = { id?: string; url: string };
+export type Member = {
+  id: string; displayName: string; age?: number; dateOfBirth?: string; email?: string;
+  phoneNumber?: string; gender?: string; city?: string; distanceKm?: number;
+  occupation?: string; bio?: string; isVerified?: boolean; verification?: { status?: string };
+  interests?: string[]; photos?: Photo[]; relationshipGoal?: string;
+  onboardingComplete?: boolean; showMe?: string; maxDistanceKm?: number;
+  interestIds?: string[]; preferences?: { minAge?: number; maxAge?: number; maxDistanceKm?: number; showMe?: string };
+  basics?: Record<string, string>; prompt?: { promptId?: string; answer?: string };
+  alreadySwiped?: boolean;
+};
+export type Match = { id: string; conversationId: string; otherUser: Member; createdAt?: string };
+export type ChatMessage = {
+  id: string; conversationId: string; senderId: string; text?: string;
+  attachment?: Photo; status?: string; sentAt: string; unsentAt?: string;
+  clientMessageId?: string | null;
+};
+export type Conversation = {
+  id: string; matchId: string; otherUser: Member;
+  lastMessage?: ChatMessage; unreadCount: number;
+};
+export type Like = { id?: string; user: Member; action: string; likedAt?: string };
+export type Notification = { id: string; title?: string; body?: string; message?: string; type?: string; isRead?: boolean; readAt?: string; createdAt?: string };
+export type Product = { id: string; title: string; description?: string; priceLabel?: string; period?: string };
+export type Entitlement = { tier?: string; isActive?: boolean; expiresAt?: string; willRenew?: boolean };
+export type Ticket = { id: string; subject: string; category: string; status: string; createdAt: string; messages: { author: string; body: string }[] };

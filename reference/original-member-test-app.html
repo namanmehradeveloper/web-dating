@@ -1,0 +1,1968 @@
+<!doctype html>
+<!--
+  Dating Cloud member test app (dark, mobile-first).
+  OTP login, profile onboarding, discovery, likes, matches and chat.
+  Served by the admin dev server at http://127.0.0.1:5173/test-app.html (or its ngrok URL);
+  the API, uploads and Socket.IO are called on the page's own origin and Vite proxies them to port 5050.
+  Development/testing only; OTP is configured server-side.
+  Sessions are per-tab using sessionStorage for two-member testing.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Dating Cloud</title>
+<meta name="theme-color" content="#0f0d12" />
+<meta name="description" content="Dating Cloud member test experience — discover, match and chat." />
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0f0d12;
+  --surface: #1a171e;
+  --surface-2: #231f28;
+  --line: rgba(255,255,255,.09);
+  --text: #f6f3f8;
+  --muted: #a39bab;
+  --pink: #ff4f81;
+  --pink-2: #ff7a8f;
+  --coral: #ff6b5e;
+  --success: #2fbf8a;
+  --danger: #ff6b81;
+  --appbar-h: 64px;
+  --nav-h: 96px;
+  --column: 520px;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { background: var(--bg); }
+body { margin: 0; min-height: 100vh; color: var(--text); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+body.has-nav main { padding-bottom: calc(var(--nav-h) + 12px); }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+h1, h2, h3, p { margin: 0; }
+a { color: var(--pink-2); }
+:focus-visible { outline: 2px solid rgba(255,79,129,.6); outline-offset: 2px; }
+
+.ico { display: inline-grid; place-items: center; width: 1em; height: 1em; flex: none; }
+.ico svg { width: 100%; height: 100%; display: block; }
+
+/* App bar */
+.appbar { position: sticky; top: 0; z-index: 30; background: rgba(15,13,18,.92); backdrop-filter: blur(14px); }
+.appbar-inner { max-width: var(--column); height: var(--appbar-h); margin: 0 auto; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand .logo { color: var(--pink); font-size: 30px; }
+.brand h1 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); min-width: 0; }
+.who strong { color: var(--text); max-width: 110px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+.who button { white-space: nowrap; flex: none; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #5d5664; flex: none; }
+.dot.on { background: var(--success); box-shadow: 0 0 0 3px rgba(47,191,138,.18); }
+
+main { max-width: var(--column); margin: 0 auto; padding: 4px 12px 24px; }
+
+/* Controls */
+label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 0 6px; }
+input:not([type=checkbox]), select, textarea {
+  width: 100%; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--text); outline: none; font-size: 14px;
+  transition: border-color .15s, box-shadow .15s;
+}
+input:not([type=checkbox]):focus, select:focus, textarea:focus { border-color: rgba(255,79,129,.6); box-shadow: 0 0 0 3px rgba(255,79,129,.15); }
+input::placeholder, textarea::placeholder { color: #6f6776; }
+select option { background: var(--surface-2); }
+textarea { min-height: 96px; resize: vertical; }
+input[type=file] { padding: 10px; cursor: pointer; }
+input::file-selector-button { border: 0; border-radius: 10px; padding: 8px 12px; margin-right: 10px; background: rgba(255,79,129,.16); color: var(--pink-2); font-weight: 700; cursor: pointer; }
+input[type=checkbox] { accent-color: var(--pink); width: 16px; height: 16px; margin: 0; }
+
+button {
+  border: 0; border-radius: 14px; padding: 12px 18px; cursor: pointer; font-weight: 700; font-size: 14px;
+  color: #fff; background: linear-gradient(110deg, var(--pink), var(--pink-2));
+  transition: transform .12s, opacity .12s, background .15s;
+}
+button:active:not(:disabled) { transform: scale(.97); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.ghost { background: rgba(255,255,255,.06); border: 1px solid var(--line); color: var(--text); }
+button.danger { background: rgba(255,107,129,.12); border: 1px solid rgba(255,107,129,.25); color: var(--danger); }
+button.small { padding: 7px 12px; font-size: 12px; border-radius: 10px; }
+button.block { width: 100%; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 18px; margin-bottom: 14px; }
+.card h2 { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+.card h3 { font-size: 14px; font-weight: 700; margin: 16px 0 8px; }
+.section-title { font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 22px 4px 10px; }
+.hint { font-size: 13px; color: var(--muted); }
+.muted { font-size: 12px; color: var(--muted); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.actions > button { flex: 1; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 7px; margin: 0; padding: 7px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; }
+.chip:has(input:checked) { border-color: rgba(255,79,129,.55); background: rgba(255,79,129,.14); color: #ffd3de; }
+.badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--pink); color: #fff; font-size: 10px; font-weight: 800; margin-left: 6px; }
+.avatar { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; background: var(--surface-2); flex: none; }
+
+/* Auth */
+.auth { padding-top: 28px; }
+.auth-hero { text-align: center; padding: 10px 10px 26px; }
+.auth-logo { display: inline-grid; place-items: center; width: 76px; height: 76px; border-radius: 24px; font-size: 42px; color: #fff; background: linear-gradient(135deg, var(--pink), var(--coral)); box-shadow: 0 16px 40px rgba(255,79,129,.3); margin-bottom: 18px; }
+.auth-hero h2 { font-size: 30px; font-weight: 850; letter-spacing: -.03em; margin-bottom: 8px; }
+.auth-hero p { color: var(--muted); max-width: 340px; margin: 0 auto; }
+.auth-card { padding: 22px; }
+.auth-step { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.step-count { font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.step-bars { display: flex; gap: 5px; }
+.step-bars i { width: 28px; height: 4px; border-radius: 99px; background: rgba(255,255,255,.12); }
+.step-bars i.done { background: linear-gradient(90deg, var(--pink), var(--coral)); }
+.auth-card h2 { font-size: 22px; margin-bottom: 6px; }
+.auth-card .actions button { min-height: 50px; }
+.tip { margin-top: 16px; padding: 12px 14px; border-radius: 14px; background: rgba(255,79,129,.08); border: 1px solid rgba(255,79,129,.18); color: #ffc2d1; font-size: 12px; }
+.footnote { margin-top: 18px; text-align: center; font-size: 11px; color: #6f6776; }
+
+/* Discover card */
+.deck { position: relative; height: calc(100dvh - var(--appbar-h) - var(--nav-h) - 22px); min-height: 380px; }
+.swipe-card { position: absolute; inset: 0; border-radius: 28px; overflow: hidden; background: linear-gradient(160deg, #2a2330, #17141b); box-shadow: 0 20px 50px rgba(0,0,0,.45); }
+.card-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; cursor: pointer; user-select: none; }
+.photo-bars { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; gap: 4px; z-index: 2; }
+.photo-bars span { flex: 1; height: 3px; border-radius: 99px; background: rgba(255,255,255,.32); }
+.photo-bars span.on { background: #fff; }
+.seen-pill { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); z-index: 2; padding: 6px 12px; border-radius: 99px; background: rgba(0,0,0,.6); border: 1px solid var(--line); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.card-info { position: absolute; left: 0; right: 0; bottom: 0; padding: 120px 18px 18px; background: linear-gradient(to bottom, transparent 0%, rgba(8,6,10,.55) 30%, rgba(8,6,10,.9) 100%); }
+.name-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.name-row h2 { font-size: 32px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+.name-row .age { font-weight: 400; }
+.verified { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: 6px; border-radius: 50%; background: #3b82f6; font-size: 12px; vertical-align: middle; }
+.meta-line { display: flex; align-items: center; gap: 8px; font-size: 16px; margin: 3px 0; }
+.meta-line .ico { font-size: 19px; opacity: .9; }
+.card-bio { margin-top: 8px; font-size: 14px; color: rgba(255,255,255,.85); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.tag { padding: 3px 10px; border-radius: 99px; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); font-size: 12px; font-weight: 600; }
+.card-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; padding: 0 8px; }
+.round { display: grid; place-items: center; padding: 0; border-radius: 50%; background: rgba(15,13,18,.55); border: 1.5px solid rgba(255,255,255,.3); color: #fff; }
+.round.xs { width: 38px; height: 38px; font-size: 18px; background: rgba(15,13,18,.7); border-color: transparent; flex: none; }
+.round.sm { width: 52px; height: 52px; font-size: 20px; }
+.round.lg { width: 68px; height: 68px; font-size: 30px; }
+.round.undo, .round.super { color: var(--coral); }
+.round.like { color: var(--pink); }
+.round:disabled { opacity: .35; }
+
+.empty { text-align: center; padding: 48px 24px; }
+.empty .empty-icon { display: inline-grid; place-items: center; width: 76px; height: 76px; border-radius: 24px; background: rgba(255,79,129,.12); color: var(--pink); font-size: 36px; margin-bottom: 16px; }
+.empty h2 { font-size: 22px; margin-bottom: 8px; }
+.empty p { color: var(--muted); max-width: 320px; margin: 0 auto 20px; }
+
+/* Bottom sheet */
+.sheet-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; justify-content: center; }
+.sheet { width: 100%; max-width: var(--column); max-height: 86vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-bottom: 0; border-radius: 26px 26px 0 0; padding: 10px 18px 24px; }
+.sheet-handle { width: 42px; height: 4px; border-radius: 99px; background: rgba(255,255,255,.2); margin: 0 auto 14px; }
+.sheet h2 { font-size: 24px; margin-bottom: 6px; }
+.match-backdrop { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 20px; background: rgba(10,8,12,.55); backdrop-filter: blur(6px); animation: fade-in .2s ease-out; }
+.match-pop { width: min(100%, 410px); padding: 30px 24px 26px; border-radius: 28px; text-align: center; color: #fff; background: linear-gradient(150deg, #ff2f7a 0%, #ff4f81 45%, #ff7a5e 100%); box-shadow: 0 24px 60px rgba(255,79,129,.35); animation: pop-in .28s cubic-bezier(.2,.9,.3,1.3); }
+.match-pop h2 { font-size: 30px; font-weight: 800; letter-spacing: -.02em; }
+.match-pop .match-avatar { width: 124px; height: 124px; margin: 20px auto 16px; border-radius: 50%; object-fit: cover; border: 4px solid #fff; background: rgba(255,255,255,.2); display: block; }
+.match-pop p { font-size: 16px; font-weight: 600; margin-bottom: 22px; }
+.match-pop .send { width: 100%; background: #fff; color: #e8336f; font-size: 17px; font-weight: 700; padding: 15px; box-shadow: none; }
+.match-pop .keep { width: 100%; margin-top: 10px; background: none; border: 0; box-shadow: none; color: #fff; font-weight: 700; }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes pop-in { from { opacity: 0; transform: scale(.85); } }
+.photo-strip { display: flex; gap: 8px; overflow-x: auto; margin: 12px -2px; padding-bottom: 4px; }
+.photo-strip img { width: 130px; height: 170px; border-radius: 16px; object-fit: cover; flex: none; background: var(--surface-2); }
+.modal { width: 100%; max-width: var(--column); background: var(--surface); border-radius: 26px 26px 0 0; padding: 22px 18px 26px; border: 1px solid var(--line); border-bottom: 0; }
+.modal h2 { font-size: 20px; margin-bottom: 8px; }
+
+/* Matches */
+.h-scroll { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 6px; }
+.like-card { flex: none; width: 140px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 8px; text-align: center; }
+.like-card img { width: 100%; height: 150px; border-radius: 14px; object-fit: cover; background: var(--surface-2); display: block; }
+.like-card strong { display: block; margin: 8px 0 2px; font-size: 13px; }
+.like-card button { width: 100%; margin-top: 8px; }
+.locked { display: flex; gap: 14px; align-items: center; }
+.locked .lock-icon { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 18px; background: rgba(255,79,129,.14); color: var(--pink); font-size: 26px; flex: none; }
+.match-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.match-tile { position: relative; padding: 0; border-radius: 18px; overflow: hidden; background: var(--surface-2); aspect-ratio: 3 / 4; border: 1px solid var(--line); }
+.match-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.match-tile span.name { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 8px 8px; font-size: 12px; font-weight: 700; text-align: left; background: linear-gradient(transparent, rgba(0,0,0,.8)); }
+.match-tile .badge { position: absolute; top: 8px; right: 8px; margin: 0; }
+.list-item { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.list-item:last-child { border-bottom: 0; }
+
+/* Chats */
+.chat-row { display: flex; gap: 12px; align-items: center; width: 100%; padding: 12px; margin-bottom: 8px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; font-weight: 400; }
+.chat-row strong { display: block; font-size: 15px; }
+.chat-row .grow { flex: 1; min-width: 0; }
+.chat-screen { display: flex; flex-direction: column; height: calc(100dvh - var(--appbar-h) - var(--nav-h) - 16px); min-height: 440px; background: var(--surface); border: 1px solid var(--line); border-radius: 24px; overflow: hidden; }
+.chat-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.chat-head h2 { font-size: 16px; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.chat-head .avatar { width: 40px; height: 40px; }
+.chat-menu { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.chat-menu button { flex: 1; }
+.messages { flex: 1; overflow-y: auto; padding: 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+.messages > :first-child { margin-top: auto; }
+.bubble { max-width: 78%; width: fit-content; padding: 9px 13px; border-radius: 18px 18px 18px 6px; background: var(--surface-2); align-self: flex-start; overflow-wrap: anywhere; }
+.bubble.mine { align-self: flex-end; border-radius: 18px 18px 6px 18px; background: linear-gradient(110deg, var(--pink), var(--pink-2)); }
+.bubble .meta { display: flex; gap: 8px; justify-content: flex-end; margin-top: 3px; font-size: 10px; opacity: .7; }
+.bubble .meta a { color: inherit; cursor: pointer; text-decoration: underline; }
+.bubble .chat-photo { display: block; max-width: 100%; max-height: 320px; border-radius: 12px; margin: 2px 0 6px; }
+.typing { min-height: 20px; padding: 0 16px; font-size: 12px; font-style: italic; color: var(--muted); }
+.composer { display: flex; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+.composer input { border-radius: 99px; }
+.composer button { border-radius: 50%; width: 46px; height: 46px; padding: 0; display: grid; place-items: center; font-size: 20px; flex: none; }
+
+/* Profile */
+.me-head { display: flex; gap: 14px; align-items: center; }
+.me-head .avatar { width: 76px; height: 76px; flex: none; }
+.me-head > div { min-width: 0; }
+.me-head h2 { font-size: 22px; margin: 0; overflow-wrap: anywhere; }
+.photo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.photo-grid .photo-box { position: relative; aspect-ratio: 3 / 4; }
+.photo-grid img { width: 100%; height: 100%; object-fit: cover; border-radius: 14px; background: var(--surface-2); display: block; }
+.photo-grid .photo-box button { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: rgba(15,13,18,.75); border: 1px solid rgba(255,255,255,.25); color: #fff; font-size: 12px; }
+.photo-grid .photo-box button.move { top: auto; bottom: 6px; right: auto; left: 6px; }
+.photo-grid .main-pill { position: absolute; left: 6px; bottom: 6px; padding: 2px 8px; border-radius: 99px; background: var(--pink); font-size: 10px; font-weight: 800; }
+.segments { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 12px; scrollbar-width: none; }
+.segments button { flex: none; padding: 8px 14px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); color: #cfc8d5; font-size: 13px; }
+.segments button.active { background: rgba(255,79,129,.16); border-color: rgba(255,79,129,.45); color: var(--pink); }
+.pill { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 11px; font-weight: 800; letter-spacing: .03em; background: rgba(255,255,255,.08); border: 1px solid var(--line); }
+.pill.good { background: rgba(47,191,138,.14); border-color: rgba(47,191,138,.35); color: #7fe0bb; }
+.pill.warn { background: rgba(255,170,60,.14); border-color: rgba(255,170,60,.35); color: #ffc876; }
+.pill.bad { background: rgba(255,107,129,.14); border-color: rgba(255,107,129,.35); color: #ff9aae; }
+.notif { display: flex; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.notif:last-child { border-bottom: 0; }
+.notif .unread-dot { width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--pink); flex: none; }
+.notif .unread-dot.read { background: transparent; }
+.notif .grow { flex: 1; min-width: 0; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); margin: 0; font-size: 14px; color: var(--text); font-weight: 600; cursor: pointer; }
+.switch-row:last-of-type { border-bottom: 0; }
+.plan { padding: 14px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface-2); margin-top: 10px; }
+.plan strong { font-size: 16px; }
+.plan .price { float: right; font-weight: 800; color: var(--pink-2); }
+details.faq { padding: 12px 0; border-bottom: 1px solid var(--line); }
+details.faq:last-child { border-bottom: 0; }
+details.faq summary { cursor: pointer; font-weight: 700; }
+details.faq p { margin-top: 8px; color: var(--muted); }
+.ticket-msg { padding: 8px 12px; border-radius: 12px; background: var(--surface-2); margin-top: 6px; font-size: 13px; overflow-wrap: anywhere; }
+.ticket-msg.staff { background: rgba(255,79,129,.1); }
+.or { display: flex; align-items: center; gap: 10px; margin: 18px 0 4px; color: var(--muted); font-size: 12px; }
+.or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin-top: 8px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.selfie-preview { width: 140px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 16px; display: block; margin-top: 10px; background: var(--surface-2); }
+.chat-head .who-btn { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 0; background: none; text-align: left; }
+.preview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.preview img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 14px; }
+
+/* Bottom navigation */
+.bottom-nav { position: fixed; z-index: 40; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(calc(100% - 20px), calc(var(--column) - 20px)); display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 7px; border-radius: 30px; background: rgba(26,23,30,.96); border: 1px solid var(--line); box-shadow: 0 10px 40px rgba(0,0,0,.5); backdrop-filter: blur(14px); }
+.nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 4px; border-radius: 22px; background: transparent; color: #cfc8d5; font-size: 12px; font-weight: 700; }
+.nav-item.active { background: rgba(255,79,129,.16); color: var(--pink); }
+.nav-icon { position: relative; font-size: 22px; line-height: 0; }
+.nav-badge { position: absolute; top: -6px; right: -12px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 99px; background: var(--pink); color: #fff; font-size: 10px; line-height: 17px; text-align: center; }
+
+/* Toasts */
+#toasts { position: fixed; z-index: 60; top: calc(var(--appbar-h) + 6px); left: 50%; transform: translateX(-50%); width: min(calc(100% - 24px), 420px); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.toast { padding: 12px 16px; border-radius: 16px; background: #2b2631; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0,0,0,.45); font-size: 13px; pointer-events: auto; }
+.toast.success { background: #123d30; border-color: rgba(47,191,138,.35); }
+.toast.error { background: #461a26; border-color: rgba(255,107,129,.35); }
+
+@media (max-width: 380px) {
+  .name-row h2 { font-size: 27px; }
+  .round.lg { width: 60px; height: 60px; }
+  .round.sm { width: 46px; height: 46px; }
+  .grid2 { grid-template-columns: 1fr; }
+  .who strong { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="appbar">
+  <div class="appbar-inner">
+    <div class="brand">
+      <span class="ico logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 19a5 5 0 0 1-.6-9.96A6 6 0 0 1 18 8.5 4.5 4.5 0 0 1 17.5 19H7z"/></svg></span>
+      <h1 id="page-title">Dating Cloud</h1>
+    </div>
+    <span id="who" class="who" aria-live="polite"></span>
+  </div>
+</header>
+
+<main id="app"></main>
+<nav id="bottom-nav" class="bottom-nav" aria-label="Main" hidden></nav>
+<div id="toasts"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// Same origin as the page: the Vite dev server proxies /api, /uploads and /socket.io to the backend.
+// Set window.DATING_CLOUD_BACKEND_URL before this script to call another backend directly.
+const API_ORIGIN = (window.DATING_CLOUD_BACKEND_URL || window.location.origin).replace(/\/$/, '');
+const API = `${API_ORIGIN}/api/v1`;
+const TERMS_VERSION = '2026-01';
+const TYPING_INTERVAL_MS = 3000;
+const SESSION_KEY = 'dc_test_session';
+
+const GENDERS = ['WOMAN', 'MAN', 'NON_BINARY'];
+const SHOW_ME = ['EVERYONE', 'WOMEN', 'MEN'];
+const RELATIONSHIP_GOALS = ['LONG_TERM', 'LONG_TERM_OPEN_TO_SHORT', 'SHORT_TERM_OPEN_TO_LONG', 'SHORT_TERM_FUN', 'NEW_FRIENDS', 'STILL_FIGURING_OUT'];
+const REPORT_REASONS = ['FAKE_PROFILE', 'INAPPROPRIATE_PHOTOS', 'HARASSMENT', 'SPAM_OR_SCAM', 'UNDERAGE', 'OFFLINE_BEHAVIOUR', 'OTHER'];
+
+const state = {
+  session: JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null'),
+  me: null,
+  tab: 'discover',
+  socket: null,
+  discovery: [],
+  swipeHistory: [],
+  matches: [],
+  conversations: [],
+  openMatch: null,
+  profileSection: 'profile',
+  messages: [],
+  unread: {},
+  lastTypingSentAt: 0,
+  typingHideTimer: null,
+  chatRefs: null,
+};
+
+// ---------- small helpers ----------
+
+// Builds a DOM element. Text children are inserted as text, so user content can never inject HTML.
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (value === undefined || value === null || value === false) continue;
+    if (key.startsWith('on')) node.addEventListener(key.slice(2).toLowerCase(), value);
+    else if (key === 'className') node.className = value;
+    else if (key === 'value') node.value = value;
+    else node.setAttribute(key, value === true ? '' : value);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : String(child));
+  }
+  return node;
+}
+
+const ICONS = {
+  briefcase: { d: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>' },
+  pin: { d: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>' },
+  undo: { d: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>' },
+  x: { d: '<path d="M6 6l12 12M18 6 6 18"/>' },
+  star: { fill: true, d: '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>' },
+  heart: { fill: true, d: '<path d="M12 20.5s-8-4.9-8-10.6A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 2.9c0 5.7-8 10.6-8 10.6z"/>' },
+  heartOutline: { d: '<path d="M12 20.5s-8-4.9-8-10.6A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 2.9c0 5.7-8 10.6-8 10.6z"/>' },
+  cards: { d: '<rect x="4" y="6" width="11" height="15" rx="2"/><path d="M9 3.5l9.3 2.4a2 2 0 0 1 1.4 2.4l-2.9 11.3"/>' },
+  chat: { d: '<path d="M4 5h16v11H9l-5 4z"/>' },
+  person: { d: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>' },
+  up: { d: '<path d="M12 19V5M5 12l7-7 7 7"/>' },
+  back: { d: '<path d="M15 18l-6-6 6-6"/>' },
+  send: { d: '<path d="M4 12l16-8-6 16-3-7z"/>' },
+  image: { d: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-9 8"/>' },
+  more: { fill: true, d: '<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>' },
+};
+
+// Returns an inline SVG icon. Icon markup comes only from the fixed ICONS table, never from user data.
+function icon(name) {
+  const { d, fill } = ICONS[name];
+  const span = el('span', { className: 'ico', 'aria-hidden': 'true' });
+  span.innerHTML = `<svg viewBox="0 0 24 24" fill="${fill ? 'currentColor' : 'none'}" stroke="${fill ? 'none' : 'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  return span;
+}
+
+// Generates a unique request ID for idempotent API actions.
+function uuid() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (c) => (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16));
+}
+
+function toast(message, tone = '') {
+  const node = el('div', { className: `toast ${tone}` }, message);
+  document.getElementById('toasts').append(node);
+  setTimeout(() => node.remove(), tone === 'error' ? 6000 : 3500);
+}
+
+function errorText(error) {
+  const details = (error.details || []).map((item) => `${item.field}: ${item.reason}`).join(', ');
+  return `${error.code ? `${error.code} – ` : ''}${error.message}${details ? ` (${details})` : ''}`;
+}
+
+// Runs an action, disabling the button meanwhile, and shows any error as a toast.
+async function attempt(button, action) {
+  if (button) button.disabled = true;
+  try {
+    return await action();
+  } catch (error) {
+    toast(errorText(error), 'error');
+    return undefined;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+// Turns a backend-relative image path into an absolute URL; absolute URLs are returned unchanged.
+function mediaUrl(url) {
+  if (!url) return '';
+  if (/^(blob:|data:)/i.test(url)) return url;
+  if (/^https?:/i.test(url)) {
+    // Backend builds absolute URLs from APP_URL; uploads are served same-origin through the proxy.
+    const parsed = new URL(url);
+    return parsed.pathname.startsWith('/uploads/') ? `${API_ORIGIN}${parsed.pathname}${parsed.search}` : url;
+  }
+  return `${API_ORIGIN}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
+function photoUrl(profile) {
+  return mediaUrl(profile?.photos?.[0]?.url);
+}
+
+function formatTime(value) {
+  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function select(options, value) {
+  return el('select', {}, options.map((option) => el('option', { value: option, selected: option === value }, option)));
+}
+
+function setTitle(text) {
+  document.getElementById('page-title').textContent = text;
+}
+
+// ---------- API ----------
+
+class ApiError extends Error {
+  constructor(status, body) {
+    super(body?.error?.message || `HTTP ${status}`);
+    this.status = status;
+    this.code = body?.error?.code;
+    this.details = body?.error?.details || [];
+  }
+}
+
+// Keeps login tokens in per-tab session storage.
+function saveSession(session) {
+  state.session = session;
+  if (session) sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  else sessionStorage.removeItem(SESSION_KEY);
+}
+
+let refreshPromise = null;
+
+// Rotates the refresh token once, even when several requests hit 401 at the same time.
+function refreshSession() {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const res = await fetch(`${API}/auth/token/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: state.session?.refreshToken }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new ApiError(res.status, body);
+      saveSession({ ...state.session, accessToken: body.data.accessToken, refreshToken: body.data.refreshToken });
+    })().finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
+// Calls the API and returns `data`. On 401 it refreshes the session once and retries.
+async function api(method, path, { body, form, idempotencyKey, retry = true } = {}) {
+  const headers = {};
+  if (state.session?.accessToken) headers.Authorization = `Bearer ${state.session.accessToken}`;
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, { method, headers, body: form ?? (body !== undefined ? JSON.stringify(body) : undefined) });
+  } catch {
+    throw new ApiError(0, { error: { code: 'NETWORK', message: 'Backend not reachable. Is it running on port 5050?' } });
+  }
+  const payload = await res.json().catch(() => null);
+
+  if (res.status === 401 && retry && state.session?.refreshToken) {
+    try {
+      await refreshSession();
+    } catch {
+      signOutLocally('Session expired. Please log in again.');
+      throw new ApiError(401, payload);
+    }
+    return api(method, path, { body, form, idempotencyKey, retry: false });
+  }
+  if (!res.ok) throw new ApiError(res.status, payload);
+  return payload?.data;
+}
+
+async function uploadPhoto(file, purpose = 'PROFILE_PHOTO') {
+  const form = new FormData();
+  form.append('purpose', purpose);
+  form.append('file', file);
+  return api('POST', '/media/upload', { form });
+}
+
+// ---------- session ----------
+
+// Restores the current session and opens login, onboarding, or member pages.
+async function start() {
+  renderWho();
+  if (!state.session) return renderLogin();
+  try {
+    state.me = await api('GET', '/profile/me');
+  } catch (error) {
+    if (!state.session) return undefined;
+    toast(errorText(error), 'error');
+    return renderLogin();
+  }
+  renderWho();
+  if (!state.me.onboardingComplete) return renderOnboarding();
+  connectSocket();
+  loadConversations().then(() => { if (state.session) renderNav(); }).catch(() => {});
+  return renderApp();
+}
+
+function signOutLocally(message) {
+  state.socket?.disconnect();
+  state.socket = null;
+  saveSession(null);
+  state.me = null;
+  state.openMatch = null;
+  state.discovery = [];
+  state.swipeHistory = [];
+  state.unread = {};
+  state.matches = [];
+  state.conversations = [];
+  state.tab = 'discover';
+  state.profileSection = 'profile';
+  if (message) toast(message, 'error');
+  renderWho();
+  renderLogin();
+}
+
+async function logout() {
+  await api('POST', '/auth/logout', { body: { refreshToken: state.session.refreshToken } }).catch(() => {});
+  signOutLocally();
+}
+
+// Signs this member out on every device and tab, including this one.
+async function logoutEverywhere(button) {
+  if (!confirm('Sign out of all devices? Every phone, browser and tab using this account will be logged out.')) return;
+  await attempt(button, async () => {
+    await api('POST', '/auth/logout-all', { retry: false });
+    signOutLocally();
+    toast('Signed out of all devices.', 'success');
+  });
+}
+
+// Shows the member's name and the live-connection dot in the app bar.
+function renderWho() {
+  const who = document.getElementById('who');
+  if (!state.session) {
+    who.replaceChildren(el('span', {}, 'Not logged in'));
+    return;
+  }
+  const connected = Boolean(state.socket?.connected);
+  who.replaceChildren(
+    el('span', { className: `dot ${connected ? 'on' : ''}`, title: connected ? 'Live (socket connected)' : 'Socket not connected' }),
+    el('strong', {}, state.me?.displayName || state.me?.phoneNumber || 'Member'),
+    el('button', { className: 'ghost small', onClick: logout }, 'Log out'),
+  );
+}
+
+function hideNav() {
+  document.getElementById('bottom-nav').hidden = true;
+  document.body.classList.remove('has-nav');
+}
+
+// ---------- login ----------
+
+// Shared layout of the sign-in screens. `stepNumber` (1 or 2) shows the phone/OTP progress; null hides it.
+function renderAuthLayout(content, stepNumber = null) {
+  hideNav();
+  setTitle('Dating Cloud');
+  document.getElementById('app').replaceChildren(el('div', { className: 'auth' },
+    el('div', { className: 'auth-hero' },
+      el('div', { className: 'auth-logo' }, icon('heart')),
+      el('h2', {}, 'Find your person'),
+      el('p', {}, 'Discover people nearby, match when it is mutual, and start a real conversation.'),
+    ),
+    el('div', { className: 'card auth-card' },
+      stepNumber ? el('div', { className: 'auth-step' },
+        el('span', { className: 'step-count' }, `Step ${stepNumber} of 2`),
+        el('div', { className: 'step-bars', 'aria-hidden': 'true' },
+          el('i', { className: 'done' }), el('i', { className: stepNumber === 2 ? 'done' : '' })),
+      ) : null,
+      ...content,
+    ),
+    el('p', { className: 'footnote' }, 'Development test app · Your session is private to this browser tab.'),
+  ));
+}
+
+// Step 1: the phone number. Continue requests a code and moves to the OTP step.
+function renderLogin(initialPhone = '+919800000001') {
+  const phone = el('input', { type: 'tel', value: initialPhone, placeholder: '+919800000001', autocomplete: 'tel', 'aria-label': 'Phone number' });
+  const continueButton = el('button', {}, 'Continue');
+
+  const requestCode = () => attempt(continueButton, async () => {
+    const phoneNumber = phone.value.trim();
+    const otp = await api('POST', '/auth/otp/request', { body: { phoneNumber } });
+    toast('Test OTP ready — use 123456 to sign in.', 'success');
+    renderOtpStep(phoneNumber, otp.resendAfterSeconds);
+  });
+  continueButton.addEventListener('click', requestCode);
+  phone.addEventListener('keydown', (event) => { if (event.key === 'Enter') requestCode(); });
+
+  renderAuthLayout([
+    el('h2', {}, 'Enter your phone number'),
+    el('p', { className: 'hint' }, 'We will send a code to sign you in or create your account.'),
+    el('label', {}, 'Mobile number'),
+    phone,
+    el('div', { className: 'actions' }, continueButton),
+    el('div', { className: 'tip' }, 'Testing with two members? Open another tab and use a different phone number.'),
+    el('div', { className: 'or' }, 'or'),
+    el('div', { className: 'actions' }, el('button', { className: 'ghost', onClick: () => renderEmailLogin() }, 'Continue with email')),
+    el('div', { className: 'actions' },
+      el('button', { className: 'ghost', onClick: (event) => trySocialSignIn('google', event.currentTarget) }, 'Google'),
+      el('button', { className: 'ghost', onClick: (event) => trySocialSignIn('apple', event.currentTarget) }, 'Apple')),
+  ], 1);
+  phone.focus();
+}
+
+// Email/password sign-in for member accounts that were created with an email.
+function renderEmailLogin() {
+  const email = el('input', { type: 'email', placeholder: 'you@example.com', autocomplete: 'email', 'aria-label': 'Email' });
+  const password = el('input', { type: 'password', placeholder: 'Password', autocomplete: 'current-password', 'aria-label': 'Password' });
+  const signIn = el('button', {}, 'Sign in');
+
+  const submit = () => attempt(signIn, async () => {
+    const data = await api('POST', '/auth/login', { body: { email: email.value.trim(), password: password.value } });
+    if (data.user.role !== 'USER') {
+      // Staff accounts have no member profile; end the session that was just issued.
+      await fetch(`${API}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.tokens.accessToken}` },
+        body: JSON.stringify({ refreshToken: data.tokens.refreshToken }),
+      }).catch(() => {});
+      throw new Error('Staff accounts sign in to the admin panel, not the member app.');
+    }
+    saveSession({ accessToken: data.tokens.accessToken, refreshToken: data.tokens.refreshToken, userId: data.user.id });
+    toast('Welcome back!', 'success');
+    await start();
+  });
+  signIn.addEventListener('click', submit);
+  password.addEventListener('keydown', (event) => { if (event.key === 'Enter') submit(); });
+
+  renderAuthLayout([
+    el('h2', {}, 'Sign in with email'),
+    el('p', { className: 'hint' }, 'For accounts that were created with an email and password.'),
+    el('label', {}, 'Email'), email,
+    el('label', {}, 'Password'), password,
+    el('div', { className: 'actions' }, signIn),
+    el('div', { className: 'actions' }, el('button', { className: 'ghost', onClick: () => renderLogin() }, 'Use phone number instead')),
+  ]);
+  email.focus();
+}
+
+// Google/Apple need provider credentials the backend does not have yet, so it answers FEATURE_NOT_CONFIGURED.
+// The placeholder token is never trusted by the server.
+function trySocialSignIn(provider, button) {
+  return attempt(button, () => api('POST', `/auth/social/${provider}`, { body: { idToken: 'test-app-placeholder' } }));
+}
+
+// Step 2: the code. Verifying registers a new number (account created) or signs in an existing one.
+function renderOtpStep(phoneNumber, resendAfterSeconds) {
+  const code = el('input', { inputmode: 'numeric', type: 'text', maxlength: '6', placeholder: 'Enter 6-digit code', autocomplete: 'one-time-code', 'aria-label': 'Verification code' });
+  const verifyButton = el('button', {}, 'Verify & continue');
+  const resendButton = el('button', { className: 'ghost' }, 'Resend code');
+  let cooldownTimer;
+
+  // Keeps the resend button disabled until the backend-provided wait is over.
+  const startCooldown = (seconds) => {
+    clearInterval(cooldownTimer);
+    let left = seconds;
+    const tick = () => {
+      resendButton.disabled = left > 0;
+      resendButton.textContent = left > 0 ? `Resend (${left}s)` : 'Resend code';
+      if (left <= 0) clearInterval(cooldownTimer);
+      left -= 1;
+    };
+    tick();
+    cooldownTimer = setInterval(tick, 1000);
+  };
+
+  const verify = () => attempt(verifyButton, async () => {
+    const data = await api('POST', '/auth/otp/verify', { body: { phoneNumber, code: code.value.trim() } });
+    clearInterval(cooldownTimer);
+    saveSession({ accessToken: data.tokens.accessToken, refreshToken: data.tokens.refreshToken, userId: data.user.id });
+    toast(data.isNewUser ? 'Your account is ready!' : 'Welcome back!', 'success');
+    await start();
+  });
+  verifyButton.addEventListener('click', verify);
+  code.addEventListener('keydown', (event) => { if (event.key === 'Enter') verify(); });
+
+  resendButton.addEventListener('click', async () => {
+    resendButton.disabled = true;
+    const otp = await attempt(null, () => api('POST', '/auth/otp/request', { body: { phoneNumber } }));
+    if (!otp) {
+      resendButton.disabled = false;
+      return;
+    }
+    toast('Test OTP refreshed — use 123456.', 'success');
+    startCooldown(otp.resendAfterSeconds);
+  });
+
+  const changeNumber = () => {
+    clearInterval(cooldownTimer);
+    renderLogin(phoneNumber);
+  };
+
+  renderAuthLayout([
+    el('h2', {}, 'Verify your number'),
+    el('p', { className: 'hint' }, `Code sent to ${phoneNumber}.`),
+    el('label', {}, 'Verification code'), code,
+    el('div', { className: 'tip' }, 'Test code: ', el('strong', {}, '123456'), ' — no real SMS is sent.'),
+    el('div', { className: 'actions' }, verifyButton),
+    el('div', { className: 'actions' }, resendButton, el('button', { className: 'ghost', onClick: changeNumber }, 'Change number')),
+  ], 2);
+  startCooldown(resendAfterSeconds);
+  code.focus();
+}
+
+// ---------- onboarding ----------
+
+async function renderOnboarding() {
+  hideNav();
+  setTitle('Create profile');
+  const app = document.getElementById('app');
+  app.replaceChildren(el('div', { className: 'card' }, 'Loading profile setup…'));
+  const interests = await attempt(null, () => api('GET', '/interests'));
+  if (!interests) return;
+
+  const displayName = el('input', { maxlength: '40', placeholder: 'What should people call you?' });
+  const dateOfBirth = el('input', { type: 'date', value: '1998-01-15' });
+  const gender = select(GENDERS, 'WOMAN');
+  const showMe = select(SHOW_ME, 'EVERYONE');
+  const goal = select(RELATIONSHIP_GOALS, 'LONG_TERM');
+  const distance = el('input', { type: 'number', min: '1', max: '500', value: '500' });
+  const bio = el('textarea', { maxlength: '500', placeholder: 'A few words about you, your interests, or your perfect weekend…' });
+  const photos = el('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', multiple: true });
+  const preview = el('div', { className: 'preview' });
+  const interestBoxes = interests.items.map((item, index) => {
+    const box = el('input', { type: 'checkbox', value: item.id, checked: index < 2 });
+    return { box, node: el('label', { className: 'chip' }, box, item.label) };
+  });
+  const submit = el('button', { className: 'block' }, 'Create my profile');
+
+  photos.addEventListener('change', () => {
+    preview.replaceChildren(...[...photos.files].map((file) => el('img', { src: URL.createObjectURL(file), alt: `Selected ${file.name}` })));
+  });
+
+  submit.addEventListener('click', () => attempt(submit, async () => {
+    const files = [...photos.files];
+    if (files.length < 2 || files.length > 6) throw new Error('Choose 2 to 6 photos.');
+    const interestIds = interestBoxes.filter(({ box }) => box.checked).map(({ box }) => box.value);
+    if (interestIds.length < 1 || interestIds.length > 10) throw new Error('Choose 1 to 10 interests.');
+
+    const photoMediaIds = [];
+    for (const [index, file] of files.entries()) {
+      submit.textContent = `Uploading photo ${index + 1}/${files.length}…`;
+      const media = await uploadPhoto(file);
+      const mediaId = media.mediaId || media.id;
+      if (!mediaId) throw new Error('Upload succeeded without a media ID. Check the backend response.');
+      photoMediaIds.push(mediaId);
+    }
+    submit.textContent = 'Saving your profile…';
+    state.me = await api('POST', '/profile/onboarding', {
+      body: {
+        displayName: displayName.value.trim(),
+        dateOfBirth: dateOfBirth.value,
+        gender: gender.value,
+        showGender: true,
+        showMe: showMe.value,
+        maxDistanceKm: Number(distance.value),
+        relationshipGoal: goal.value,
+        interestIds,
+        photoMediaIds,
+        bio: bio.value.trim() || undefined,
+        acceptedTermsVersion: TERMS_VERSION,
+      },
+    });
+    toast('Your profile is ready to discover!', 'success');
+    await start();
+  }).finally(() => { submit.textContent = 'Create my profile'; }));
+
+  app.replaceChildren(
+    el('div', { className: 'card' },
+      el('h2', {}, 'The basics'),
+      el('p', { className: 'hint' }, 'This is what people see first.'),
+      el('label', {}, 'Display name'), displayName,
+      el('div', { className: 'grid2' },
+        el('div', {}, el('label', {}, 'Date of birth (18+)'), dateOfBirth),
+        el('div', {}, el('label', {}, 'I am'), gender),
+        el('div', {}, el('label', {}, 'Show me'), showMe),
+        el('div', {}, el('label', {}, 'Max distance (km)'), distance),
+      ),
+      el('label', {}, 'Looking for'), goal,
+      el('label', {}, 'Bio (optional)'), bio,
+    ),
+    el('div', { className: 'card' },
+      el('h2', {}, 'Interests'),
+      el('p', { className: 'hint' }, 'Choose 1 to 10.'),
+      el('div', { className: 'chips', style: 'margin-top:12px' }, interestBoxes.map(({ node }) => node)),
+    ),
+    el('div', { className: 'card' },
+      el('h2', {}, 'Photos'),
+      el('p', { className: 'hint' }, '2–6 JPG, PNG or WebP photos, max 10 MB each. Select them all at once.'),
+      el('div', { style: 'margin-top:12px' }, photos),
+      preview,
+    ),
+    submit,
+  );
+}
+
+// ---------- app shell ----------
+
+const TABS = ['discover', 'matches', 'chat', 'profile'];
+
+const TAB_INFO = {
+  discover: { icon: 'cards', label: 'Discover', title: 'Discover' },
+  matches: { icon: 'heartOutline', label: 'Matches', title: 'Matches' },
+  chat: { icon: 'chat', label: 'Chats', title: 'Chats' },
+  profile: { icon: 'person', label: 'Profile', title: 'Profile' },
+};
+
+// Draws the bottom navigation, including the unread badge on Chats.
+function renderNav() {
+  const nav = document.getElementById('bottom-nav');
+  nav.hidden = false;
+  document.body.classList.add('has-nav');
+  const unreadTotal = Object.values(state.unread).reduce((sum, count) => sum + count, 0);
+  nav.replaceChildren(...TABS.map((id) => el('button', {
+    className: `nav-item ${state.tab === id ? 'active' : ''}`,
+    'data-tab': id,
+    'aria-current': state.tab === id ? 'page' : undefined,
+    onClick: () => {
+      if (id !== 'chat' || state.tab === 'chat') state.openMatch = null;
+      state.tab = id;
+      renderApp();
+    },
+  },
+  el('span', { className: 'nav-icon' }, icon(TAB_INFO[id].icon),
+    id === 'chat' && unreadTotal > 0 ? el('span', { className: 'nav-badge' }, unreadTotal) : null),
+  el('span', {}, TAB_INFO[id].label))));
+}
+
+function renderApp() {
+  const content = el('section', {});
+  document.getElementById('app').replaceChildren(content);
+  setTitle(TAB_INFO[state.tab].title);
+  renderNav();
+  state.chatRefs = null;
+
+  if (state.tab === 'discover') renderDiscover(content);
+  if (state.tab === 'matches') renderMatches(content);
+  if (state.tab === 'chat') renderChatTab(content);
+  if (state.tab === 'profile') renderProfile(content);
+}
+
+// ---------- report & block ----------
+
+function openSheet(build) {
+  const backdrop = el('div', { className: 'sheet-backdrop' });
+  const close = () => backdrop.remove();
+  backdrop.append(build(close));
+  backdrop.addEventListener('click', (event) => { if (event.target === backdrop) close(); });
+  document.body.append(backdrop);
+  return close;
+}
+
+function showMatchPopup(match) {
+  const other = match.otherUser;
+  const backdrop = el('div', { className: 'match-backdrop' });
+  const close = () => backdrop.remove();
+  backdrop.append(el('div', { className: 'match-pop', role: 'dialog', 'aria-label': "It's a match" },
+    el('h2', {}, "It's a match!"),
+    el('img', { className: 'match-avatar', src: photoUrl(other), alt: '' }),
+    el('p', {}, `You and ${other.displayName} like each other.`),
+    el('button', { className: 'send', onClick: () => { close(); openChat(match); } }, 'Send a message'),
+    el('button', { className: 'keep', onClick: close }, 'Keep swiping'),
+  ));
+  backdrop.addEventListener('click', (event) => { if (event.target === backdrop) close(); });
+  document.body.append(backdrop);
+}
+
+function openReportDialog(title, onSubmit) {
+  openSheet((close) => {
+    const reason = select(REPORT_REASONS, 'FAKE_PROFILE');
+    const details = el('textarea', { maxlength: '1000', placeholder: 'Optional details' });
+    const alsoBlock = el('input', { type: 'checkbox', checked: true });
+    const send = el('button', { className: 'danger' }, 'Send report');
+    send.addEventListener('click', () => attempt(send, async () => {
+      await onSubmit({ reason: reason.value, details: details.value.trim() || undefined, alsoBlock: alsoBlock.checked });
+      toast('Report sent. Thank you.', 'success');
+      close();
+    }));
+    return el('div', { className: 'modal' },
+      el('div', { className: 'sheet-handle' }),
+      el('h2', {}, title),
+      el('label', {}, 'Reason'), reason,
+      el('label', {}, 'Details'), details,
+      el('label', { className: 'chip', style: 'margin-top:12px' }, alsoBlock, 'Also block this member'),
+      el('div', { className: 'actions' }, send, el('button', { className: 'ghost', onClick: close }, 'Cancel')),
+    );
+  });
+}
+
+function reportUser(user, afterReport) {
+  openReportDialog(`Report ${user.displayName}`, async (input) => {
+    await api('POST', '/reports', { body: { targetType: 'USER', targetId: user.id, ...input } });
+    afterReport?.();
+  });
+}
+
+async function blockUser(user, button, afterBlock) {
+  if (!confirm(`Block ${user.displayName}? This also ends your match.`)) return;
+  await attempt(button, async () => {
+    await api('POST', `/users/${user.id}/block`);
+    toast(`${user.displayName} blocked`, 'success');
+    afterBlock?.();
+  });
+}
+
+// ---------- discover ----------
+
+async function renderDiscover(container) {
+  container.replaceChildren(el('div', { className: 'card' }, 'Finding profiles for you…'));
+  if (state.discovery.length === 0) {
+    const data = await attempt(null, () => api('GET', '/discovery?limit=20'));
+    if (!data) return;
+    state.discovery = data.items;
+  }
+  showNextProfile(container);
+}
+
+function locationLine(profile) {
+  return [profile.city, profile.distanceKm ? `${profile.distanceKm} km away` : null].filter(Boolean).join(' · ');
+}
+
+// Full profile with every photo, opened from the arrow on the card.
+function openProfileSheet(profile, afterAction) {
+  openSheet((close) => el('div', { className: 'sheet' },
+    el('div', { className: 'sheet-handle' }),
+    el('h2', {}, `${profile.displayName}, ${profile.age}`, profile.isVerified ? el('span', { className: 'verified', title: 'Verified' }, '✓') : null),
+    profile.occupation ? el('div', { className: 'meta-line' }, icon('briefcase'), profile.occupation) : null,
+    locationLine(profile) ? el('div', { className: 'meta-line' }, icon('pin'), locationLine(profile)) : null,
+    el('div', { className: 'photo-strip' }, (profile.photos || []).map((photo) => el('img', { src: mediaUrl(photo.url), alt: '' }))),
+    profile.bio ? el('p', { style: 'margin:8px 0 12px' }, profile.bio) : null,
+    profile.relationshipGoal ? el('p', { className: 'muted' }, `Looking for: ${profile.relationshipGoal.replaceAll('_', ' ').toLowerCase()}`) : null,
+    profile.prompt ? el('p', { style: 'margin:8px 0' }, el('strong', {}, `${profile.prompt.promptId.replaceAll('_', ' ').toLowerCase()}: `), profile.prompt.answer) : null,
+    (profile.interests || []).length ? el('div', { className: 'tags' }, profile.interests.map((interest) => el('span', { className: 'tag' }, interest))) : null,
+    el('div', { className: 'actions' },
+      el('button', { className: 'ghost small', onClick: () => { close(); reportUser(profile, afterAction); } }, 'Report'),
+      el('button', { className: 'danger small', onClick: (event) => blockUser(profile, event.currentTarget, () => { close(); afterAction(); }) }, 'Block'),
+      el('button', { className: 'ghost small', onClick: close }, 'Close'),
+    ),
+  ));
+}
+
+// Loads the member's current public profile and opens it; falls back to the copy we already have.
+async function openMemberProfile(userId, fallback, afterAction) {
+  let profile = fallback;
+  try {
+    profile = await api('GET', `/profiles/${userId}`);
+  } catch (error) {
+    if (error.code === 'NOT_FOUND' || !fallback) {
+      toast(error.code === 'NOT_FOUND' ? 'This profile is no longer available.' : errorText(error), 'error');
+      return;
+    }
+  }
+  openProfileSheet(profile, afterAction);
+}
+
+// Shows the first profile in the queue as a full-screen card. Tap the left or right half of the photo to switch photos.
+function showNextProfile(container) {
+  const profile = state.discovery[0];
+  if (!profile) {
+    container.replaceChildren(el('div', { className: 'card empty' },
+      el('div', { className: 'empty-icon' }, icon('heartOutline')),
+      el('h2', {}, 'You are all caught up'),
+      el('p', {}, 'New people can show up any time. For testing, open another tab with a different number and finish onboarding.'),
+      el('button', { onClick: () => { state.discovery = []; renderDiscover(container); } }, 'Refresh')));
+    return;
+  }
+
+  const photos = profile.photos?.length ? profile.photos : [{ url: '' }];
+  const img = el('img', { className: 'card-photo', alt: `${profile.displayName}'s photo`, draggable: 'false' });
+  const bars = el('div', { className: 'photo-bars', hidden: photos.length < 2 }, photos.map(() => el('span')));
+  let photoIndex = 0;
+  const showPhoto = (index) => {
+    photoIndex = (index + photos.length) % photos.length;
+    img.src = mediaUrl(photos[photoIndex].url);
+    [...bars.children].forEach((bar, n) => bar.classList.toggle('on', n === photoIndex));
+  };
+  img.addEventListener('click', (event) => {
+    const rect = img.getBoundingClientRect();
+    showPhoto(photoIndex + (event.clientX - rect.left < rect.width / 2 ? -1 : 1));
+  });
+  showPhoto(0);
+
+  const next = () => { state.discovery.shift(); showNextProfile(container); };
+
+  const swipe = (action) => async (event) => {
+    if (profile.alreadySwiped) {
+      toast('Your earlier choice for this profile is kept.');
+      next();
+      return;
+    }
+    const data = await attempt(event.currentTarget, () => api('POST', '/swipes', {
+      body: { targetUserId: profile.id, action },
+      idempotencyKey: uuid(),
+    }));
+    if (!data) return;
+    state.swipeHistory.push({ profile, matched: data.isMatch });
+    next();
+    if (data.isMatch) showMatchPopup(data.match);
+  };
+
+  const interests = profile.interests || [];
+  const location = locationLine(profile);
+  container.replaceChildren(el('div', { className: 'deck' },
+    el('article', { className: 'swipe-card' },
+      img,
+      bars,
+      profile.alreadySwiped ? el('div', { className: 'seen-pill' }, 'Shown again · earlier choice kept') : null,
+      el('div', { className: 'card-info' },
+        el('div', { className: 'name-row' },
+          el('h2', {}, profile.displayName, ' ', el('span', { className: 'age' }, profile.age),
+            profile.isVerified ? el('span', { className: 'verified', title: 'Verified' }, '✓') : null),
+          el('button', { className: 'round xs', 'aria-label': `More about ${profile.displayName}`, onClick: () => openMemberProfile(profile.id, profile, next) }, icon('up')),
+        ),
+        profile.occupation ? el('div', { className: 'meta-line' }, icon('briefcase'), profile.occupation) : null,
+        location ? el('div', { className: 'meta-line' }, icon('pin'), location) : null,
+        profile.bio ? el('p', { className: 'card-bio' }, profile.bio) : null,
+        interests.length ? el('div', { className: 'tags' }, interests.slice(0, 5).map((interest) => el('span', { className: 'tag' }, interest))) : null,
+        el('div', { className: 'card-actions' },
+          el('button', {
+            className: 'round sm undo',
+            'aria-label': 'Undo last swipe',
+            disabled: state.swipeHistory.length === 0,
+            onClick: (event) => undoLastSwipe(event.currentTarget, container),
+          }, icon('undo')),
+          el('button', { className: 'round lg pass', 'aria-label': 'Pass', onClick: swipe('PASS') }, icon('x')),
+          el('button', { className: 'round sm super', 'aria-label': 'Super like', onClick: swipe('SUPER_LIKE') }, icon('star')),
+          el('button', { className: 'round lg like', 'aria-label': 'Like', onClick: swipe('LIKE') }, icon('heart')),
+        ),
+      ),
+    ),
+  ));
+}
+
+// Brings back the last swiped profile. Premium members get a real undo (the swipe is deleted);
+// for free members the backend refuses, so the profile is only shown again and the earlier swipe stays saved.
+async function undoLastSwipe(button, container) {
+  const last = state.swipeHistory[state.swipeHistory.length - 1];
+  if (!last) return;
+  if (last.matched) {
+    toast('That like created a match. Unmatch from Chats instead.', 'error');
+    return;
+  }
+  const result = await attempt(button, async () => {
+    try {
+      return await api('POST', '/swipes/undo');
+    } catch (error) {
+      if (error.code === 'SUBSCRIPTION_REQUIRED') return { uiOnly: true };
+      throw error;
+    }
+  });
+  if (!result) return;
+
+  state.swipeHistory.pop();
+  if (result.uiOnly) {
+    state.discovery.unshift({ ...last.profile, alreadySwiped: true });
+    toast('Showing the profile again. Your earlier choice stays saved — real undo needs Premium.');
+  } else {
+    state.discovery.unshift(result.restoredProfile || last.profile);
+    toast('Swipe undone', 'success');
+  }
+  showNextProfile(container);
+}
+
+// ---------- matches ----------
+
+async function loadMatches() {
+  const data = await api('GET', '/matches?limit=50');
+  state.matches = data.items;
+}
+
+function openChat(match) {
+  state.tab = 'chat';
+  state.openMatch = match;
+  renderApp();
+}
+
+// Liked you, your matches, and the likes still waiting for an answer.
+async function renderMatches(container) {
+  const likedYou = el('div', {}, el('p', { className: 'hint' }, 'Loading…'));
+  const matchesBox = el('div', {}, el('p', { className: 'hint' }, 'Loading…'));
+  const sentBox = el('div', { className: 'card' }, el('p', { className: 'hint' }, 'Loading…'));
+  container.replaceChildren(
+    el('p', { className: 'section-title' }, 'Liked you'), likedYou,
+    el('p', { className: 'section-title' }, 'Your matches'), matchesBox,
+    el('p', { className: 'section-title' }, 'You liked'), sentBox,
+  );
+
+  try {
+    const data = await api('GET', '/likes/received?limit=50');
+    likedYou.replaceChildren(data.items.length === 0
+      ? el('div', { className: 'card' }, el('p', { className: 'hint' }, 'Nobody is waiting for an answer yet.'))
+      : el('div', { className: 'h-scroll' }, data.items.map((like) => el('div', { className: 'like-card' },
+        el('img', { src: photoUrl(like.user), alt: '' }),
+        el('strong', {}, `${like.user.displayName}, ${like.user.age}`),
+        el('span', { className: 'muted' }, like.action === 'SUPER_LIKE' ? '★ Super like' : '♥ Like'),
+        el('button', { className: 'small', onClick: (event) => attempt(event.currentTarget, async () => {
+          const result = await api('POST', '/swipes', { body: { targetUserId: like.user.id, action: 'LIKE' }, idempotencyKey: uuid() });
+          renderMatches(container);
+          if (result.isMatch) showMatchPopup(result.match);
+        }) }, 'Like back')))));
+  } catch (error) {
+    if (error.code === 'SUBSCRIPTION_REQUIRED') {
+      const count = Number((error.details[0]?.reason || '').replace('COUNT_', '')) || 0;
+      likedYou.replaceChildren(el('div', { className: 'card locked' },
+        el('div', { className: 'lock-icon' }, icon('heart')),
+        el('div', {},
+          el('strong', {}, count === 0 ? 'Nobody yet' : `${count} ${count === 1 ? 'person likes' : 'people like'} you`),
+          el('p', { className: 'hint' }, 'Seeing who needs Premium (PLUS). You can still find them in Discover.'))));
+    } else {
+      likedYou.replaceChildren(el('div', { className: 'card' }, el('p', { className: 'hint' }, errorText(error))));
+    }
+  }
+
+  const loaded = await attempt(null, async () => { await loadMatches(); return true; });
+  if (loaded) {
+    matchesBox.replaceChildren(state.matches.length === 0
+      ? el('div', { className: 'card' }, el('p', { className: 'hint' }, 'No matches yet. Like someone who liked you back.'))
+      : el('div', { className: 'match-grid' }, state.matches.map((match) => {
+        const unread = state.unread[match.conversationId] || 0;
+        return el('button', { className: 'match-tile', onClick: () => openChat(match) },
+          el('img', { src: photoUrl(match.otherUser), alt: '' }),
+          el('span', { className: 'name' }, match.otherUser.displayName),
+          unread ? el('span', { className: 'badge' }, unread) : null);
+      })));
+  }
+
+  const sentData = await attempt(null, () => api('GET', '/likes/sent?limit=50'));
+  if (!sentData) return;
+  sentBox.replaceChildren(...(sentData.items.length === 0
+    ? [el('p', { className: 'hint' }, 'No pending likes.')]
+    : sentData.items.map((like) => el('div', { className: 'list-item' },
+      el('img', { className: 'avatar', src: photoUrl(like.user), alt: '' }),
+      el('div', { style: 'flex:1' }, el('strong', {}, `${like.user.displayName}, ${like.user.age}`),
+        el('div', { className: 'muted' }, `${like.action === 'SUPER_LIKE' ? '★ Super like' : '♥ Like'} · ${new Date(like.likedAt).toLocaleString()}`)),
+    ))));
+}
+
+// ---------- chats ----------
+
+// Loads open conversations (most recent first) and takes the unread counts from the server.
+async function loadConversations() {
+  const data = await api('GET', '/conversations?limit=50');
+  state.conversations = data.items;
+  for (const conversation of data.items) state.unread[conversation.id] = conversation.unreadCount;
+}
+
+// The chat screen works with match-shaped objects: { id, conversationId, otherUser }.
+function conversationToMatch(conversation) {
+  return { id: conversation.matchId, conversationId: conversation.id, otherUser: conversation.otherUser };
+}
+
+function lastMessageLine(conversation) {
+  const last = conversation.lastMessage;
+  if (!last) return 'New match — say hi!';
+  return `${last.senderId === state.session.userId ? 'You: ' : ''}${messagePreview(last)}`;
+}
+
+// Short text for a message in lists and toasts; a photo without a caption reads "Photo".
+function messagePreview(message) {
+  if (!message.attachment) return message.text;
+  return message.text ? `Photo: ${message.text}` : 'Photo';
+}
+
+async function renderChatTab(container) {
+  container.replaceChildren(el('div', { className: 'card' }, 'Loading chats…'));
+  try {
+    await loadConversations();
+  } catch (error) {
+    container.replaceChildren(el('div', { className: 'card' }, `Could not load chats: ${errorText(error)}`));
+    return;
+  }
+  renderNav();
+
+  const stillOpen = state.openMatch && state.conversations.find((item) => item.id === state.openMatch.conversationId);
+  if (stillOpen) {
+    await renderChatPanel(container, conversationToMatch(stillOpen));
+    return;
+  }
+  state.openMatch = null;
+
+  if (state.conversations.length === 0) {
+    container.replaceChildren(el('div', { className: 'card empty' },
+      el('div', { className: 'empty-icon' }, icon('chat')),
+      el('h2', {}, 'No chats yet'),
+      el('p', {}, 'When you match with someone, your conversation shows up here.'),
+      el('button', { onClick: () => { state.tab = 'discover'; renderApp(); } }, 'Go to Discover')));
+    return;
+  }
+  container.replaceChildren(...state.conversations.map((conversation) => {
+    const unread = state.unread[conversation.id] || 0;
+    return el('button', { className: 'chat-row', onClick: () => { state.openMatch = conversationToMatch(conversation); renderApp(); } },
+      el('img', { className: 'avatar', src: photoUrl(conversation.otherUser), alt: '' }),
+      el('div', { className: 'grow' },
+        el('strong', {}, conversation.otherUser.displayName),
+        el('div', { className: 'muted', style: 'overflow:hidden;white-space:nowrap;text-overflow:ellipsis' }, lastMessageLine(conversation))),
+      conversation.lastMessage ? el('span', { className: 'muted' }, formatTime(conversation.lastMessage.sentAt)) : null,
+      unread ? el('span', { className: 'badge' }, unread) : null);
+  }));
+}
+
+async function renderChatPanel(container, match) {
+  const other = match.otherUser;
+  const list = el('div', { className: 'messages' });
+  const typing = el('div', { className: 'typing' });
+  const input = el('input', { placeholder: `Message ${other.displayName}…`, maxlength: '1000' });
+  const send = el('button', { 'aria-label': 'Send' }, icon('send'));
+  const photoInput = el('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', hidden: true });
+  const photoButton = el('button', { className: 'ghost', 'aria-label': 'Send a photo', title: 'Send a photo', onClick: () => photoInput.click() }, icon('image'));
+  state.chatRefs = { list, typing, conversationId: match.conversationId };
+  state.unread[match.conversationId] = 0;
+  renderNav();
+
+  const leave = () => { state.openMatch = null; renderApp(); };
+  const menu = el('div', { className: 'chat-menu', hidden: true },
+    el('button', { className: 'ghost small', onClick: (event) => {
+      if (!confirm(`Unmatch ${other.displayName}?`)) return;
+      attempt(event.currentTarget, async () => { await api('POST', `/matches/${match.id}/unmatch`); toast('Unmatched'); leave(); });
+    } }, 'Unmatch'),
+    el('button', { className: 'ghost small', onClick: () => reportUser(other, leave) }, 'Report'),
+    el('button', { className: 'danger small', onClick: (event) => blockUser(other, event.currentTarget, leave) }, 'Block'),
+  );
+
+  container.replaceChildren(el('div', { className: 'chat-screen' },
+    el('div', { className: 'chat-head' },
+      el('button', { className: 'round xs', 'aria-label': 'Back to chats', onClick: leave }, icon('back')),
+      el('button', { className: 'who-btn', 'aria-label': `View ${other.displayName}'s profile`, onClick: () => openMemberProfile(other.id, other, leave) },
+        el('img', { className: 'avatar', src: photoUrl(other), alt: '' }),
+        el('h2', {}, other.displayName)),
+      el('button', { className: 'round xs', 'aria-label': 'Chat options', onClick: () => { menu.hidden = !menu.hidden; } }, icon('more')),
+    ),
+    menu,
+    list,
+    typing,
+    el('div', { className: 'composer' }, photoButton, photoInput, input, send),
+  ));
+
+  const sendMessage = () => attempt(send, async () => {
+    const text = input.value.trim();
+    if (!text) return;
+    const clientMessageId = uuid();
+    const message = await api('POST', `/conversations/${match.conversationId}/messages`, {
+      body: { text, clientMessageId },
+      idempotencyKey: clientMessageId,
+    });
+    input.value = '';
+    addMessage(message);
+    input.focus();
+  });
+  send.addEventListener('click', sendMessage);
+  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') sendMessage(); });
+
+  // Uploads the picked photo for chat, then sends it with whatever is typed as its caption.
+  photoInput.addEventListener('change', () => {
+    const file = photoInput.files[0];
+    photoInput.value = '';
+    if (!file) return;
+    attempt(photoButton, async () => {
+      const media = await uploadPhoto(file, 'CHAT_ATTACHMENT');
+      const text = input.value.trim();
+      const clientMessageId = uuid();
+      const message = await api('POST', `/conversations/${match.conversationId}/messages`, {
+        body: { ...(text ? { text } : {}), attachmentMediaId: media.mediaId, clientMessageId },
+        idempotencyKey: clientMessageId,
+      });
+      input.value = '';
+      addMessage(message);
+      input.focus();
+    });
+  });
+  input.addEventListener('input', () => {
+    const now = Date.now();
+    if (!state.socket?.connected || now - state.lastTypingSentAt < TYPING_INTERVAL_MS) return;
+    state.lastTypingSentAt = now;
+    state.socket.emit('typing', { conversationId: match.conversationId, isTyping: true }, () => {});
+  });
+
+  list.append(el('div', { className: 'muted' }, 'Loading messages…'));
+  const data = await attempt(null, () => api('GET', `/conversations/${match.conversationId}/messages?limit=50`));
+  state.messages = data?.items || [];
+  renderMessages();
+  markLatestRead();
+  input.focus();
+}
+
+function renderMessages() {
+  const refs = state.chatRefs;
+  if (!refs) return;
+  const myId = state.session.userId;
+  refs.list.replaceChildren(...(state.messages.length === 0
+    ? [el('div', { className: 'muted', style: 'text-align:center' }, 'No messages yet. Say hi!')]
+    : state.messages.map((message) => {
+      const mine = message.senderId === myId;
+      return el('div', { className: `bubble ${mine ? 'mine' : ''}` },
+        message.attachment ? el('img', { className: 'chat-photo', src: mediaUrl(message.attachment.url), alt: 'Photo', loading: 'lazy' }) : null,
+        message.text || null,
+        el('div', { className: 'meta' },
+          el('span', {}, formatTime(message.sentAt)),
+          mine ? el('span', {}, message.status === 'READ' ? '✓✓ Seen' : '✓ Sent') : null,
+          mine ? null : el('a', { onClick: () => openReportDialog('Report message', (input) =>
+            api('POST', `/messages/${message.id}/report`, { body: input })) }, 'Report'),
+        ));
+    })));
+  refs.list.scrollTop = refs.list.scrollHeight;
+}
+
+function addMessage(message) {
+  if (state.messages.some((item) => item.id === message.id)) return;
+  state.messages.push(message);
+  renderMessages();
+}
+
+// Tells the other member we have read everything they sent in the open chat.
+function markLatestRead() {
+  const refs = state.chatRefs;
+  if (!refs) return;
+  const lastFromOther = [...state.messages].reverse().find((message) => message.senderId !== state.session.userId);
+  if (!lastFromOther || lastFromOther.status === 'READ') return;
+  const payload = { conversationId: refs.conversationId, upToMessageId: lastFromOther.id };
+  if (state.socket?.connected) state.socket.emit('message:read', payload, () => {});
+  else api('POST', `/messages/${lastFromOther.id}/read`).catch(() => {});
+  lastFromOther.status = 'READ';
+}
+
+// ---------- socket ----------
+
+function connectSocket() {
+  if (typeof io === 'undefined') {
+    toast('Socket.IO client not loaded – start the backend and reload this page.', 'error');
+    return;
+  }
+  state.socket?.disconnect();
+  const socket = io(`${API_ORIGIN}/v1`, {
+    transports: ['websocket'],
+    auth: (send) => send({ token: state.session?.accessToken }),
+  });
+  state.socket = socket;
+
+  let lastReconnectAt = 0;
+  const reconnectWithFreshToken = async () => {
+    if (Date.now() - lastReconnectAt < 5000) {
+      toast('Live connection keeps failing. Reload the page.', 'error');
+      return;
+    }
+    lastReconnectAt = Date.now();
+    try {
+      await refreshSession();
+      socket.connect();
+    } catch {
+      signOutLocally('Session expired. Please log in again.');
+    }
+  };
+
+  socket.on('connect', renderWho);
+  // The server disconnects when the access token expires or the session is revoked; the client
+  // does not reconnect by itself after that, so refresh the token and connect again.
+  socket.on('disconnect', (reason) => {
+    renderWho();
+    if (reason === 'io server disconnect' && state.session) reconnectWithFreshToken();
+  });
+  socket.on('connect_error', (error) => {
+    renderWho();
+    if (error?.data?.code === 'UNAUTHENTICATED' || error?.message === 'UNAUTHENTICATED') reconnectWithFreshToken();
+    else if (error?.message === 'ACCOUNT_INELIGIBLE') toast('This account is suspended or banned.', 'error');
+  });
+
+  socket.on('message:new', async ({ message }) => {
+    const refs = state.chatRefs;
+    if (refs && refs.conversationId === message.conversationId) {
+      addMessage(message);
+      if (message.senderId !== state.session.userId) markLatestRead();
+      return;
+    }
+    if (message.senderId === state.session.userId) return;
+    state.unread[message.conversationId] = (state.unread[message.conversationId] || 0) + 1;
+    let conversation = state.conversations.find((item) => item.id === message.conversationId);
+    if (!conversation) {
+      conversation = await api('GET', `/conversations/${message.conversationId}`).catch(() => null);
+      if (conversation) state.conversations.unshift(conversation);
+    }
+    toast(`New message from ${conversation?.otherUser.displayName || 'your match'}: ${messagePreview(message)}`);
+    if (state.tab === 'chat' && !state.openMatch) renderApp();
+    else renderNav();
+  });
+
+  socket.on('typing', ({ conversationId, isTyping }) => {
+    const refs = state.chatRefs;
+    if (!refs || refs.conversationId !== conversationId) return;
+    refs.typing.textContent = isTyping ? `${state.openMatch?.otherUser.displayName || 'They'} is typing…` : '';
+    clearTimeout(state.typingHideTimer);
+    state.typingHideTimer = setTimeout(() => { refs.typing.textContent = ''; }, 4000);
+  });
+
+  socket.on('message:read', ({ conversationId, readerId, upToMessageId }) => {
+    const refs = state.chatRefs;
+    if (!refs || refs.conversationId !== conversationId || readerId === state.session.userId) return;
+    const upTo = state.messages.findIndex((message) => message.id === upToMessageId);
+    state.messages.forEach((message, index) => {
+      if (message.senderId === state.session.userId && (upTo === -1 || index <= upTo)) message.status = 'READ';
+    });
+    renderMessages();
+  });
+
+  socket.on('match:new', ({ match }) => {
+    if (state.tab === 'matches' || (state.tab === 'chat' && !state.openMatch)) renderApp();
+    if (state.tab === 'chat' && state.openMatch) toast(`New match with ${match.otherUser.displayName}!`, 'success');
+    else showMatchPopup(match);
+  });
+
+  socket.on('match:removed', ({ matchId }) => {
+    toast('A match ended.');
+    if (state.openMatch?.id === matchId) state.openMatch = null;
+    if (state.tab === 'matches' || state.tab === 'chat') renderApp();
+  });
+
+  socket.on('entitlement:updated', ({ tier, isActive }) => toast(`Subscription updated: ${tier} (${isActive ? 'active' : 'inactive'})`));
+}
+
+// ---------- profile ----------
+
+const PROFILE_SECTIONS = [
+  ['profile', 'Profile'],
+  ['alerts', 'Notifications'],
+  ['premium', 'Premium'],
+  ['help', 'Help'],
+  ['account', 'Account'],
+];
+
+const STATUS_TONES = {
+  VERIFIED: 'good', RESOLVED: 'good', READY: 'good', ok: 'good',
+  PENDING: 'warn', OPEN: 'warn', IN_PROGRESS: 'warn', PREPARING: 'warn',
+  REJECTED: 'bad', EXPIRED: 'bad', down: 'bad',
+};
+
+function statusPill(status) {
+  return el('span', { className: `pill ${STATUS_TONES[status] || ''}` }, status);
+}
+
+function loadingText() {
+  return el('p', { className: 'hint' }, 'Loading…');
+}
+
+// The Profile tab has its own section tabs; each section loads only the APIs it needs.
+function renderProfile(container) {
+  const body = el('div', {});
+  container.replaceChildren(
+    el('div', { className: 'segments', role: 'tablist' }, PROFILE_SECTIONS.map(([id, label]) => el('button', {
+      className: state.profileSection === id ? 'active' : '',
+      role: 'tab',
+      'aria-selected': state.profileSection === id ? 'true' : 'false',
+      onClick: () => { state.profileSection = id; renderProfile(container); },
+    }, label))),
+    body,
+  );
+  const renderers = { profile: renderMyProfile, alerts: renderAlerts, premium: renderPremium, help: renderHelp, account: renderAccount };
+  renderers[state.profileSection](body);
+}
+
+async function renderMyProfile(container) {
+  container.replaceChildren(el('div', { className: 'card' }, loadingText()));
+  const me = await attempt(null, () => api('GET', '/profile/me'));
+  if (!me) return;
+  state.me = me;
+  renderWho();
+
+  // Moves a photo one place earlier; moving the second photo makes it the main one.
+  const movePhoto = (index, button) => attempt(button, async () => {
+    const photoIds = me.photos.map((photo) => photo.id);
+    [photoIds[index - 1], photoIds[index]] = [photoIds[index], photoIds[index - 1]];
+    await api('PATCH', '/profile/photos/order', { body: { photoIds } });
+    toast(index === 1 ? 'Main photo changed' : 'Photo moved', 'success');
+    renderMyProfile(container);
+  });
+  const photoGrid = el('div', { className: 'photo-grid' }, me.photos.map((photo, index) => el('div', { className: 'photo-box' },
+    el('img', { src: mediaUrl(photo.url), alt: '' }),
+    el('button', { className: 'danger small', 'aria-label': 'Remove photo', onClick: (event) => attempt(event.currentTarget, async () => {
+      await api('DELETE', `/profile/photos/${photo.id}`);
+      toast('Photo removed', 'success');
+      renderMyProfile(container);
+    }) }, '✕'),
+    index === 0
+      ? el('span', { className: 'main-pill' }, 'Main')
+      : el('button', { className: 'move', 'aria-label': 'Move photo earlier', title: 'Move earlier', onClick: (event) => movePhoto(index, event.currentTarget) }, '◀'),
+  )));
+  const addInput = el('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp' });
+  const addButton = el('button', { className: 'ghost', style: 'width:100%' }, 'Add photo');
+  addButton.addEventListener('click', () => attempt(addButton, async () => {
+    const file = addInput.files[0];
+    if (!file) throw new Error('Choose a photo first.');
+    const media = await uploadPhoto(file);
+    await api('POST', '/profile/photos', { body: { mediaId: media.mediaId || media.id } });
+    toast('Photo added', 'success');
+    renderMyProfile(container);
+  }));
+
+  const interestsBox = el('div', { className: 'chips', style: 'margin-top:12px' }, loadingText());
+  let interestBoxes = [];
+  const saveInterests = el('button', {}, 'Save interests');
+  saveInterests.addEventListener('click', () => attempt(saveInterests, async () => {
+    const interestIds = interestBoxes.filter((box) => box.checked).map((box) => box.value);
+    if (interestIds.length < 1 || interestIds.length > 10) throw new Error('Choose 1 to 10 interests.');
+    state.me = await api('PUT', '/profile/interests', { body: { interestIds } });
+    state.discovery = [];
+    toast('Interests saved', 'success');
+  }));
+
+  const displayName = el('input', { value: me.displayName || '', maxlength: '40' });
+  const bio = el('textarea', { maxlength: '500' }, me.bio || '');
+  const city = el('input', { value: me.city || '', maxlength: '80' });
+  const occupation = el('input', { value: me.occupation || '', maxlength: '80' });
+  const saveProfile = el('button', {}, 'Save profile');
+  saveProfile.addEventListener('click', () => attempt(saveProfile, async () => {
+    state.me = await api('PATCH', '/profile/me', {
+      body: { displayName: displayName.value.trim(), bio: bio.value, city: city.value, occupation: occupation.value },
+    });
+    renderWho();
+    toast('Profile saved', 'success');
+  }));
+
+  const prefs = me.preferences || { minAge: 18, maxAge: 99, maxDistanceKm: 80, showMe: 'EVERYONE' };
+  const minAge = el('input', { type: 'number', min: '18', max: '99', value: prefs.minAge });
+  const maxAge = el('input', { type: 'number', min: '18', max: '99', value: prefs.maxAge });
+  const maxDistance = el('input', { type: 'number', min: '1', max: '500', value: prefs.maxDistanceKm });
+  const showMe = select(SHOW_ME, prefs.showMe);
+  const savePrefs = el('button', {}, 'Save preferences');
+  savePrefs.addEventListener('click', () => attempt(savePrefs, async () => {
+    await api('PUT', '/profile/preferences', {
+      body: { minAge: Number(minAge.value), maxAge: Number(maxAge.value), maxDistanceKm: Number(maxDistance.value), showMe: showMe.value },
+    });
+    state.discovery = [];
+    toast('Preferences saved', 'success');
+  }));
+
+  container.replaceChildren(
+    el('div', { className: 'card' },
+      el('div', { className: 'me-head' },
+        el('img', { className: 'avatar', src: photoUrl(me), alt: '' }),
+        el('div', {},
+          el('h2', {}, `${me.displayName}, ${me.age}`),
+          el('div', { className: 'muted' }, me.phoneNumber || me.email || ''),
+          el('div', { className: 'muted' }, `${me.gender} · verification: ${me.verificationStatus}`),
+        ),
+      ),
+      el('h3', {}, `Photos (${me.photos.length}/6)`),
+      photoGrid,
+      el('div', { style: 'margin-top:12px' }, addInput),
+      el('div', { style: 'margin-top:8px' }, addButton),
+      el('p', { className: 'muted', style: 'margin-top:8px' }, 'Tap ◀ to move a photo earlier. The first photo is the one people see first.'),
+    ),
+    verificationCard(me, () => renderMyProfile(container)),
+    el('div', { className: 'card' },
+      el('h2', {}, 'Edit profile'),
+      el('label', {}, 'Name'), displayName,
+      el('div', { className: 'grid2' },
+        el('div', {}, el('label', {}, 'City'), city),
+        el('div', {}, el('label', {}, 'Occupation'), occupation),
+      ),
+      el('label', {}, 'Bio'), bio,
+      el('div', { className: 'actions' }, saveProfile),
+    ),
+    el('div', { className: 'card' },
+      el('h2', {}, 'Interests'),
+      el('p', { className: 'hint' }, 'Choose 1 to 10.'),
+      interestsBox,
+      el('div', { className: 'actions' }, saveInterests),
+    ),
+    el('div', { className: 'card' },
+      el('h2', {}, 'Discovery preferences'),
+      el('div', { className: 'grid2' },
+        el('div', {}, el('label', {}, 'Min age'), minAge),
+        el('div', {}, el('label', {}, 'Max age'), maxAge),
+        el('div', {}, el('label', {}, 'Max distance (km)'), maxDistance),
+        el('div', {}, el('label', {}, 'Show me'), showMe),
+      ),
+      el('div', { className: 'actions' }, savePrefs),
+    ),
+  );
+
+  const interests = await attempt(null, () => api('GET', '/interests'));
+  if (!interests) return;
+  const mine = new Set(me.interestIds || []);
+  interestBoxes = interests.items.map((item) => el('input', { type: 'checkbox', value: item.id, checked: mine.has(item.id) }));
+  interestsBox.replaceChildren(...interests.items.map((item, index) => el('label', { className: 'chip' }, interestBoxes[index], item.label)));
+}
+
+// Selfie verification: upload the selfie, check it with GET /media/{id}, then send it for review.
+function verificationCard(me, rerender) {
+  const status = me.verificationStatus;
+  const card = el('div', { className: 'card' }, el('h2', {}, 'Photo verification ', statusPill(status)));
+  if (status === 'VERIFIED') {
+    card.append(el('p', { className: 'hint' }, 'You are verified. Your profile shows the blue check.'));
+    return card;
+  }
+  if (status === 'PENDING') {
+    card.append(el('p', { className: 'hint' }, 'Your selfie is being reviewed by our team.'));
+    return card;
+  }
+
+  const file = el('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', capture: 'user' });
+  const upload = el('button', { className: 'ghost block' }, 'Upload selfie');
+  const preview = el('div', {});
+  upload.addEventListener('click', () => attempt(upload, async () => {
+    if (!file.files[0]) throw new Error('Take or choose a selfie first.');
+    const uploaded = await uploadPhoto(file.files[0], 'VERIFICATION_SELFIE');
+    const media = await api('GET', `/media/${uploaded.mediaId || uploaded.id}`);
+    const submit = el('button', { className: 'block' }, 'Submit for review');
+    submit.addEventListener('click', () => attempt(submit, async () => {
+      await api('POST', '/profile/verification', { body: { selfieMediaId: media.id } });
+      toast('Selfie sent for review', 'success');
+      rerender();
+    }));
+    preview.replaceChildren(
+      el('img', { className: 'selfie-preview', src: mediaUrl(media.url), alt: 'Your selfie' }),
+      el('p', { className: 'muted', style: 'margin-top:6px' }, `${media.width}×${media.height} · ${Math.round(media.sizeBytes / 1024)} KB · ${media.status}`),
+      el('div', { className: 'actions' }, submit),
+    );
+  }));
+
+  card.append(
+    el('p', { className: 'hint' }, status === 'REJECTED'
+      ? 'Your last selfie was not accepted. Try again with a clear, well-lit photo of your face.'
+      : 'Take a clear selfie. A moderator compares it with your photos and adds the blue check.'),
+    el('div', { style: 'margin-top:12px' }, file),
+    el('div', { style: 'margin-top:8px' }, upload),
+    preview,
+  );
+  return card;
+}
+
+async function openMatchById(matchId, button) {
+  const match = await attempt(button, () => api('GET', `/matches/${matchId}`));
+  if (match) openChat(match);
+}
+
+// ---------- notifications ----------
+
+const NOTIFICATION_PREFS = { newMatches: 'New matches', messages: 'Messages', likes: 'Likes', promotions: 'Offers and news' };
+
+function deviceKey() {
+  return `dc_test_device_${state.session.userId}`;
+}
+
+async function renderAlerts(container) {
+  const inbox = el('div', {}, loadingText());
+  const prefsBox = el('div', {}, loadingText());
+  container.replaceChildren(
+    el('div', { className: 'card' }, el('h2', {}, 'Notifications'), inbox),
+    el('div', { className: 'card' }, el('h2', {}, 'Notification settings'), prefsBox),
+    pushDeviceCard(),
+  );
+
+  const [inboxData, prefs] = await Promise.all([
+    attempt(null, () => api('GET', '/notifications?limit=30')),
+    attempt(null, () => api('GET', '/notification-preferences')),
+  ]);
+
+  if (inboxData) {
+    const markRead = (item) => api('POST', `/notifications/${item.id}/read`);
+    const unread = inboxData.items.filter((item) => !item.readAt);
+    const markAll = el('button', { className: 'ghost small' }, `Mark all read (${unread.length})`);
+    markAll.addEventListener('click', () => attempt(markAll, async () => {
+      await Promise.all(unread.map(markRead));
+      renderAlerts(container);
+    }));
+    inbox.replaceChildren(el('div', {}, inboxData.items.length === 0
+      ? el('p', { className: 'hint' }, 'Nothing yet. Likes, matches and account updates show up here.')
+      : [
+        unread.length ? el('div', { className: 'row', style: 'justify-content:flex-end' }, markAll) : null,
+        ...inboxData.items.map((item) => el('div', { className: 'notif' },
+          el('span', { className: `unread-dot ${item.readAt ? 'read' : ''}` }),
+          el('div', { className: 'grow' },
+            el('strong', {}, item.title),
+            el('div', { className: 'hint' }, item.body),
+            el('div', { className: 'muted' }, new Date(item.createdAt).toLocaleString()),
+            el('div', { className: 'row', style: 'margin-top:6px' },
+              item.data?.matchId ? el('button', { className: 'small', onClick: (event) => {
+                if (!item.readAt) markRead(item).catch(() => {});
+                openMatchById(item.data.matchId, event.currentTarget);
+              } }, 'Open chat') : null,
+              item.readAt ? null : el('button', { className: 'ghost small', onClick: (event) => attempt(event.currentTarget, async () => {
+                await markRead(item);
+                renderAlerts(container);
+              }) }, 'Mark read'),
+            ),
+          ),
+        )),
+      ]));
+  }
+
+  if (prefs) {
+    prefsBox.replaceChildren(...Object.entries(NOTIFICATION_PREFS).map(([key, label]) => {
+      const box = el('input', { type: 'checkbox', checked: prefs[key] });
+      box.addEventListener('change', async () => {
+        const saved = await attempt(box, () => api('PATCH', '/notification-preferences', { body: { [key]: box.checked } }));
+        if (saved) toast(`${label}: ${box.checked ? 'on' : 'off'}`, 'success');
+        else box.checked = !box.checked;
+      });
+      return el('label', { className: 'switch-row' }, label, box);
+    }));
+  }
+}
+
+// Browsers have no FCM/APNs token, so this registers a test token to exercise the device API.
+function pushDeviceCard() {
+  const card = el('div', { className: 'card' });
+  const draw = () => {
+    const saved = JSON.parse(localStorage.getItem(deviceKey()) || 'null');
+    const register = el('button', { className: saved ? 'ghost' : '' }, saved ? 'Register again' : 'Register this device');
+    register.addEventListener('click', () => attempt(register, async () => {
+      const pushToken = saved?.pushToken || `test-web-${uuid()}`;
+      const device = await api('POST', '/devices', {
+        body: { platform: 'ANDROID', pushToken, appVersion: 'test-app', locale: navigator.language.slice(0, 35) },
+      });
+      localStorage.setItem(deviceKey(), JSON.stringify({ id: device.id, pushToken, lastSeenAt: device.lastSeenAt }));
+      toast('Device registered', 'success');
+      draw();
+    }));
+    const remove = saved ? el('button', { className: 'danger' }, 'Remove device') : null;
+    remove?.addEventListener('click', () => attempt(remove, async () => {
+      try {
+        await api('DELETE', `/devices/${saved.id}`);
+      } catch (error) {
+        if (error.code !== 'NOT_FOUND') throw error;
+      }
+      localStorage.removeItem(deviceKey());
+      toast('Device removed', 'success');
+      draw();
+    }));
+    card.replaceChildren(el('div', {},
+      el('h2', {}, 'Push device'),
+      el('p', { className: 'hint' }, 'Real push (FCM/APNs) is not connected yet. This saves a test token so the device API can be tried.'),
+      saved ? el('p', { className: 'muted', style: 'margin-top:8px' }, `Registered ${saved.id} · last seen ${new Date(saved.lastSeenAt).toLocaleString()}`) : null,
+      el('div', { className: 'actions' }, register, remove),
+    ));
+  };
+  draw();
+  return card;
+}
+
+// ---------- premium ----------
+
+async function renderPremium(container) {
+  container.replaceChildren(el('div', { className: 'card' }, loadingText()));
+  const [entitlement, products] = await attempt(null, () => Promise.all([
+    api('GET', '/subscriptions/entitlement'),
+    api('GET', '/subscriptions/products'),
+  ])) || [];
+  if (!entitlement) return;
+
+  // Store billing is not connected, so the backend answers FEATURE_NOT_CONFIGURED and nothing is bought.
+  const buy = (product) => (event) => attempt(event.currentTarget, () => api('POST', '/subscriptions/verify', {
+    body: { platform: 'ANDROID', productId: product.id, transactionProof: 'test-app-placeholder' },
+  }));
+  const restore = el('button', { className: 'ghost' }, 'Restore purchases');
+  restore.addEventListener('click', () => attempt(restore, () => api('POST', '/subscriptions/restore', {
+    body: { platform: 'ANDROID', transactionProofs: ['test-app-placeholder'] },
+  })));
+
+  container.replaceChildren(
+    el('div', { className: 'card' },
+      el('h2', {}, 'Your plan ', el('span', { className: `pill ${entitlement.isActive ? 'good' : ''}` }, entitlement.isActive ? entitlement.tier : 'FREE')),
+      entitlement.isActive && entitlement.expiresAt
+        ? el('p', { className: 'hint' }, `${entitlement.willRenew ? 'Renews' : 'Ends'} on ${new Date(entitlement.expiresAt).toLocaleDateString()}`)
+        : el('p', { className: 'hint' }, 'Upgrade to see who likes you and to undo swipes.'),
+    ),
+    el('div', { className: 'card' },
+      el('h2', {}, 'Plans'),
+      products.items.map((product) => el('div', { className: 'plan' },
+        el('span', { className: 'price' }, `${product.priceLabel}${product.period ? ` / ${product.period.toLowerCase()}` : ''}`),
+        el('strong', {}, product.title),
+        el('p', { className: 'hint' }, product.description),
+        el('div', { className: 'actions' }, el('button', { onClick: buy(product) }, `Get ${product.title}`)),
+      )),
+      el('div', { className: 'tip' }, 'Store billing is not connected yet, so buying and restoring answer "not available yet". Nothing is charged.'),
+      el('div', { className: 'actions' }, restore),
+    ),
+  );
+}
+
+// ---------- help ----------
+
+const TICKET_CATEGORIES = ['ACCOUNT', 'BILLING', 'SAFETY', 'BUG', 'OTHER'];
+
+// The API has no "list my tickets" endpoint, so ticket ids are remembered in this browser.
+function ticketKey() {
+  return `dc_test_tickets_${state.session.userId}`;
+}
+
+function savedTicketIds() {
+  return JSON.parse(localStorage.getItem(ticketKey()) || '[]');
+}
+
+async function renderHelp(container) {
+  const faqBox = el('div', {}, loadingText());
+  const ticketsBox = el('div', {}, loadingText());
+  const category = select(TICKET_CATEGORIES, 'OTHER');
+  const subject = el('input', { maxlength: '120', placeholder: 'Short summary (3–120 characters)' });
+  const message = el('textarea', { maxlength: '5000', placeholder: 'Tell us what happened (at least 10 characters)' });
+  const send = el('button', {}, 'Send to support');
+  send.addEventListener('click', () => attempt(send, async () => {
+    const ticket = await api('POST', '/support/tickets', {
+      body: { category: category.value, subject: subject.value.trim(), message: message.value.trim() },
+    });
+    localStorage.setItem(ticketKey(), JSON.stringify([ticket.id, ...savedTicketIds()].slice(0, 20)));
+    toast('Ticket sent. Replies show up under My tickets.', 'success');
+    renderHelp(container);
+  }));
+
+  container.replaceChildren(
+    el('div', { className: 'card' }, el('h2', {}, 'FAQs'), faqBox),
+    el('div', { className: 'card' },
+      el('h2', {}, 'Contact support'),
+      el('label', {}, 'Topic'), category,
+      el('label', {}, 'Subject'), subject,
+      el('label', {}, 'Message'), message,
+      el('div', { className: 'actions' }, send),
+    ),
+    el('div', { className: 'card' }, el('h2', {}, 'My tickets'), ticketsBox),
+  );
+
+  const faqs = await attempt(null, () => api('GET', '/support/faqs'));
+  if (faqs) {
+    faqBox.replaceChildren(...(faqs.items.length === 0
+      ? [el('p', { className: 'hint' }, 'No FAQs yet.')]
+      : faqs.items.map((faq) => el('details', { className: 'faq' }, el('summary', {}, faq.question), el('p', {}, faq.answer)))));
+  }
+
+  const results = await Promise.all(savedTicketIds().map((id) => api('GET', `/support/tickets/${id}`)
+    .catch((error) => (error.code === 'NOT_FOUND' ? null : { id, error }))));
+  const tickets = results.filter(Boolean);
+  localStorage.setItem(ticketKey(), JSON.stringify(tickets.map((ticket) => ticket.id)));
+  ticketsBox.replaceChildren(...(tickets.length === 0
+    ? [el('p', { className: 'hint' }, 'Tickets you send from this browser show up here.')]
+    : tickets.map((ticket) => (ticket.error
+      ? el('p', { className: 'hint' }, `${ticket.id}: ${errorText(ticket.error)}`)
+      : el('div', { className: 'list-item', style: 'display:block' },
+        el('div', { className: 'row' }, el('strong', { style: 'flex:1;min-width:0' }, ticket.subject), statusPill(ticket.status)),
+        el('div', { className: 'muted' }, `${ticket.category} · ${new Date(ticket.createdAt).toLocaleString()}`),
+        ticket.messages.map((item) => el('div', { className: `ticket-msg ${item.author === 'STAFF' ? 'staff' : ''}` },
+          el('strong', {}, item.author === 'STAFF' ? 'Support: ' : 'You: '), item.body)),
+      )))));
+}
+
+// ---------- account ----------
+
+async function renderAccount(container) {
+  const me = state.me || {};
+  const blocks = el('div', {}, loadingText());
+  const exportBox = el('div', {}, loadingText());
+  const healthBox = el('div', {}, loadingText());
+  container.replaceChildren(
+    el('div', { className: 'card' },
+      el('h2', {}, 'Account'),
+      el('dl', { className: 'kv' },
+        el('dt', {}, 'Member id'), el('dd', {}, me.id || state.session.userId),
+        el('dt', {}, 'Phone'), el('dd', {}, me.phoneNumber || '—'),
+        el('dt', {}, 'Email'), el('dd', {}, me.email || '—'),
+      ),
+      el('div', { className: 'actions' },
+        el('button', { className: 'ghost', onClick: logout }, 'Log out'),
+        el('button', { className: 'ghost', onClick: (event) => logoutEverywhere(event.currentTarget) }, 'Sign out of all devices')),
+    ),
+    el('div', { className: 'card' }, el('h2', {}, 'Blocked members'), blocks),
+    el('div', { className: 'card' }, el('h2', {}, 'Your data'), exportBox),
+    el('div', { className: 'card' }, el('h2', {}, 'Server status'), healthBox),
+    el('div', { className: 'card' },
+      el('h2', {}, 'Delete account'),
+      el('p', { className: 'hint' }, 'Your profile is hidden right away and deleted after a grace period. Signing in again before then cancels the deletion.'),
+      el('div', { className: 'actions' }, el('button', { className: 'danger', onClick: openDeleteAccountSheet }, 'Delete my account')),
+    ),
+  );
+
+  const [blockData, exportStatus, health] = await Promise.all([
+    attempt(null, () => api('GET', '/blocks?limit=50')),
+    attempt(null, () => api('GET', '/account/export-status')),
+    api('GET', '/health').catch((error) => ({ status: 'down', error })),
+  ]);
+
+  if (blockData) {
+    blocks.replaceChildren(...(blockData.items.length === 0
+      ? [el('p', { className: 'hint', style: 'margin-top:8px' }, 'You have not blocked anyone.')]
+      : blockData.items.map((item) => el('div', { className: 'list-item' },
+        el('div', { style: 'flex:1' }, el('strong', {}, item.user.displayName), el('div', { className: 'muted' }, `Blocked ${new Date(item.blockedAt).toLocaleString()}`)),
+        el('button', { className: 'ghost small', onClick: (event) => attempt(event.currentTarget, async () => {
+          await api('DELETE', `/users/${item.user.id}/block`);
+          toast('Unblocked', 'success');
+          renderAccount(container);
+        }) }, 'Unblock'),
+      ))));
+  }
+
+  if (exportStatus) {
+    exportBox.replaceChildren(el('div', {},
+      el('p', { style: 'margin-top:8px' }, 'Data export: ', statusPill(exportStatus.status)),
+      exportStatus.status === 'READY' && exportStatus.downloadUrl
+        ? el('a', { href: exportStatus.downloadUrl, target: '_blank', rel: 'noopener' }, 'Download your data') : null,
+      exportStatus.expiresAt ? el('p', { className: 'muted' }, `Link expires ${new Date(exportStatus.expiresAt).toLocaleString()}`) : null,
+    ));
+  }
+
+  healthBox.replaceChildren(health.error
+    ? el('p', { style: 'margin-top:8px' }, statusPill('down'), ' ', errorText(health.error))
+    : el('dl', { className: 'kv' },
+      el('dt', {}, 'API'), el('dd', {}, statusPill(health.status)),
+      el('dt', {}, 'Database'), el('dd', {}, health.database),
+      el('dt', {}, 'Environment'), el('dd', {}, health.environment),
+      el('dt', {}, 'Uptime'), el('dd', {}, `${Math.round(health.uptime / 60)} min`),
+    ));
+}
+
+// Scheduling deletion revokes every session, so the member is signed out right after.
+function openDeleteAccountSheet() {
+  openSheet((close) => {
+    const reason = el('input', { maxlength: '100', placeholder: 'Optional — why are you leaving?' });
+    const feedback = el('textarea', { maxlength: '1000', placeholder: 'Optional feedback' });
+    const confirmInput = el('input', { placeholder: 'Type DELETE to confirm', autocomplete: 'off' });
+    const confirmButton = el('button', { className: 'danger', disabled: true }, 'Delete account');
+    confirmInput.addEventListener('input', () => { confirmButton.disabled = confirmInput.value.trim() !== 'DELETE'; });
+    confirmButton.addEventListener('click', () => attempt(confirmButton, async () => {
+      const result = await api('POST', '/account/deletion-request', {
+        body: { confirm: true, reason: reason.value.trim() || undefined, feedback: feedback.value.trim() || undefined },
+      });
+      close();
+      signOutLocally(`Account deletion scheduled for ${new Date(result.scheduledFor).toLocaleDateString()}. Sign in again before then to cancel it.`);
+    }));
+    return el('div', { className: 'modal' },
+      el('div', { className: 'sheet-handle' }),
+      el('h2', {}, 'Delete your account?'),
+      el('p', { className: 'hint' }, 'You will be signed out on every device. Your matches and chats disappear for others.'),
+      el('label', {}, 'Reason'), reason,
+      el('label', {}, 'Feedback'), feedback,
+      el('label', {}, 'Confirm'), confirmInput,
+      el('div', { className: 'actions' }, confirmButton, el('button', { className: 'ghost', onClick: close }, 'Cancel')),
+    );
+  });
+}
+
+start();
+</script>
+</body>
+</html>

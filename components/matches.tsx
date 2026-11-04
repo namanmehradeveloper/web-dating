@@ -1,0 +1,28 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { Heart, ArrowRight, LockKeyhole, Star, MessageCircleHeart, Ban, Flag } from 'lucide-react';
+import { request, uid, messageOf, mediaUrl } from '@/lib/api';
+import type { Like, Match } from '@/lib/types';
+import { UserPill, Panel, Button, Loading, Empty, Failure, Modal } from './ui';
+import { useApp } from './provider';
+export function Matches({go}: {go:(p:string)=>void}) {
+ const {notify}=useApp(); const [matches,setMatches]=useState<Match[]>([]);const [received,setReceived]=useState<Like[]>([]);const [sent,setSent]=useState<Like[]>([]);
+ const [locked,setLocked]=useState(false);const [loading,setLoading]=useState(true);const [error,setError]=useState(''); const [active,setActive]=useState<'matches'|'received'|'sent'>('matches');const [more,setMore]=useState<Match|null>(null);
+ async function load(){setLoading(true);setError('');try{
+  const responses=await Promise.allSettled([request<{items:Match[]}>('GET','/matches?limit=50'),request<{items:Like[]}>('GET','/likes/received?limit=50'),request<{items:Like[]}>('GET','/likes/sent?limit=50')]);
+  if(responses[0].status==='fulfilled')setMatches(responses[0].value.items||[]);else setError(messageOf(responses[0].reason));
+  if(responses[1].status==='fulfilled'){setReceived(responses[1].value.items||[]);setLocked(false)}else if((responses[1].reason as any)?.code==='SUBSCRIPTION_REQUIRED')setLocked(true);
+  if(responses[2].status==='fulfilled')setSent(responses[2].value.items||[]);
+ }finally{setLoading(false)}}
+ useEffect(()=>{void load()},[]);
+ async function likeBack(id:string){try{await request('POST','/swipes',{body:{targetUserId:id,action:'LIKE'},idempotencyKey:uid()});notify('Like sent!');void load()}catch(e){notify(messageOf(e))}}
+ async function unmatch(match:Match){if(!confirm(`Unmatch ${match.otherUser.displayName}?`))return;try{await request('POST',`/matches/${match.id}/unmatch`);setMore(null);notify('Match removed.');void load()}catch(e){notify(messageOf(e))}}
+ return <div><div className="page-heading"><div><span className="overline purple">CONNECTIONS</span><h1>Matches & likes<span className="title-dot">.</span></h1><p>Every great conversation starts with a spark.</p></div></div>
+  <div className="section-tabs"><button className={active==='matches'?'current':''} onClick={()=>setActive('matches')}>Your matches <span>{matches.length}</span></button><button className={active==='received'?'current':''} onClick={()=>setActive('received')}>Liked you <Heart size={14}/></button><button className={active==='sent'?'current':''} onClick={()=>setActive('sent')}>Likes sent</button></div>
+  {loading?<div className="v2-match-skeleton" role="status" aria-label="Loading matches">{[0,1,2,3].map(i=><div className="v2-skeleton" key={i}/>)}<span className="sr-only">Loading your matches...</span></div>:error&&active==='matches'?<Failure error={error} retry={()=>void load()}/>:active==='matches'?<>{matches.length?<div className="match-cards">{matches.map(match=><article key={match.id} className="person-tile"><div className="portrait-placeholder">{match.otherUser.photos?.[0]?.url?<img src={mediaUrl(match.otherUser.photos[0].url)} alt={match.otherUser.displayName}/>:<Heart size={46}/>}</div><div className="person-details"><button className="dc-profile-link" aria-label={`View ${match.otherUser.displayName} profile`} onClick={()=>go(`/members/${encodeURIComponent(match.otherUser.id)}`)}><UserPill member={match.otherUser}/></button><div className="person-actions"><Button onClick={()=>go(match.conversationId?`/messages/${encodeURIComponent(match.conversationId)}`:'/messages')}><MessageCircleHeart size={16}/> Message</Button><Button tone="outline" aria-label={`Manage match with ${match.otherUser.displayName}`} onClick={()=>setMore(match)}>•••</Button></div></div></article>)}</div>:<Empty title="No matches yet" detail="When two people like each other, the magic begins here."/>}</>:
+  active==='received'?locked?<div className="premium-lock"><LockKeyhole size={35}/><h2>Someone might be waiting for you.</h2><p>See who likes you with a Plus subscription, or keep discovering for free.</p><Button onClick={()=>go('/premium')}>Explore premium <Star size={16}/></Button></div>:received.length?<div className="people-list">{received.map((like,i)=><div key={like.id||i} className="person-row"><UserPill member={like.user}/><span className="muted">{like.action==='SUPER_LIKE'?'★ Super like':'♥ Like'}</span><Button onClick={()=>void likeBack(like.user.id)}>Like back <Heart size={15}/></Button></div>)}</div>:<Empty title="No new likes" detail="Check back soon or keep swiping to discover someone new."/>:
+  sent.length?<div className="people-list">{sent.map((like,i)=><div className="person-row" key={like.id||i}><UserPill member={like.user}/><span className="muted">{like.action==='SUPER_LIKE'?'★ Super like':'♥ Like'} · {like.likedAt?new Date(like.likedAt).toLocaleDateString():''}</span></div>)}</div>:<Empty title="No outgoing likes" detail="Send a like to someone who catches your eye."/>}
+  <div className="bottom-prompt"><Heart size={22}/><div><strong>Your next connection is waiting.</strong><p>Keep exploring to meet more people.</p></div><Button onClick={()=>go('/discover')}>Discover <ArrowRight size={16}/></Button></div>
+  {more&&<Modal title={`Manage your match with ${more.otherUser.displayName}`} onClose={()=>setMore(null)}><div className="stack"><Button tone="danger" onClick={()=>void unmatch(more)}><Ban size={15}/> Unmatch</Button><p className="muted">To block or report a user, open the conversation and choose Safety actions.</p></div></Modal>}
+ </div>;
+}

@@ -1,0 +1,279 @@
+/* Dating Cloud motion layer — progressive, GPU-friendly and accessible. */
+:root {
+  --motion-ease: cubic-bezier(.22,1,.36,1);
+  --motion-quick: 190ms;
+  --motion-base: 400ms;
+  --motion-slow: 760ms;
+}
+
+/* Route entrance and scroll reveals. Content remains visible without JS. */
+@keyframes dc-page-enter {from {opacity:.8;transform:translate3d(0,10px,0)}to {opacity:1;transform:translate3d(0,0,0)}}
+@keyframes dc-reveal-up {from {opacity:0;transform:translate3d(0,35px,0)}to {opacity:1;transform:translate3d(0,0,0)}}
+@keyframes dc-reveal-left {from {opacity:0;transform:translate3d(-32px,0,0)}to {opacity:1;transform:translate3d(0,0,0)}}
+@keyframes dc-reveal-right {from {opacity:0;transform:translate3d(32px,0,0)}to {opacity:1;transform:translate3d(0,0,0)}}
+@keyframes dc-fade-in {from {opacity:0}to {opacity:1}}
+@keyframes dc-pop-in {from {opacity:0;transform:translate3d(0,12px,0) scale(.96)}to {opacity:1;transform:translate3d(0,0,0) scale(1)}}
+@keyframes dc-nav-drop {from{opacity:0;transform:translate3d(0,-12px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes dc-toast-in {from{opacity:0;transform:translate(-50%,13px) scale(.97)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
+@keyframes dc-typing-bounce {0%,55%,100% {transform:translateY(0);opacity:.45}28% {transform:translateY(-3px);opacity:1}}
+@keyframes dc-message-in {from{opacity:0;transform:translate3d(0,9px,0) scale(.985)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
+@keyframes dc-heart-beat {0%,100%{transform:scale(1)}13%{transform:scale(1.12)}25%{transform:scale(1)}35%{transform:scale(1.08)}47%{transform:scale(1)}}
+@keyframes dc-drift-photo {0%{transform:scale(1.025) translate3d(0,0,0)}100%{transform:scale(1.095) translate3d(-.6%,.35%,0)}}
+@keyframes dc-float {0%,100%{translate:0 0}50%{translate:0 -11px}}
+@keyframes dc-shimmer {to {background-position-x:-200%}}
+@keyframes dc-feedback-like {0%{opacity:1;transform:translate3d(0,0,0) rotate(0)}100%{opacity:0;transform:translate3d(135px,-42px,0) rotate(11deg)}}
+@keyframes dc-feedback-pass {0%{opacity:1;transform:translate3d(0,0,0) rotate(0)}100%{opacity:0;transform:translate3d(-135px,-42px,0) rotate(-11deg)}}
+@keyframes dc-feedback-star {0%{opacity:1;transform:scale(1)}45%{opacity:1;transform:scale(1.025)}100%{opacity:0;transform:translate3d(0,-75px,0) scale(1.05)}}
+
+main#main-content {animation:dc-page-enter 340ms var(--motion-ease) both}
+.motion-enabled [data-motion-reveal]:not(.motion-inview) {opacity:0;transform:translate3d(0,32px,0)}
+.motion-enabled [data-motion-reveal] {transition:opacity var(--motion-slow) var(--motion-ease),transform var(--motion-slow) var(--motion-ease);transition-delay:var(--motion-stagger,0ms)}
+.motion-enabled [data-motion-reveal].motion-inview {opacity:1;transform:translate3d(0,0,0)}
+/* No transform-based reveal on the decorated blocks that have intentional angles. */
+.motion-enabled .v2-intro-art[data-motion-reveal]:not(.motion-inview),
+.motion-enabled .v2-interior-visual[data-motion-reveal]:not(.motion-inview),
+.motion-enabled .v2-teaser-photo[data-motion-reveal]:not(.motion-inview) {transform:translate3d(27px,18px,0)}
+.motion-enabled .v2-hero-copy[data-motion-reveal]:not(.motion-inview),
+.motion-enabled .v2-interior-headline[data-motion-reveal]:not(.motion-inview) {transform:translate3d(-22px,20px,0)}
+.motion-enabled .v2-heart-stamp[data-motion-reveal]:not(.motion-inview) {transform:rotate(-5deg) translate3d(0,20px,0)}
+.motion-enabled .v2-heart-stamp[data-motion-reveal].motion-inview {transform:rotate(-5deg)}
+/* Animated hero with a controlled, slow Ken Burns effect. */
+.v2-hero-photo {animation:dc-drift-photo 24s ease-in-out infinite alternate}
+@media(min-width:681px) and (prefers-reduced-motion:no-preference) {.v2-hero-photo{will-change:transform}}
+.v2-hero .v2-heart-stamp {animation:dc-float 5.5s ease-in-out infinite}
+.v2-hero .v2-heart-stamp svg {animation:dc-heart-beat 5s ease-in-out 1.5s infinite}
+.v2-hero-assurance span {transition:color var(--motion-quick),transform var(--motion-quick)}
+.v2-hero-assurance span:hover {color:white;transform:translateY(-2px)}
+.v2-intro-floating {animation:dc-float 6s ease-in-out .6s infinite}
+.v2-teaser-photo-label {animation:dc-float 7s ease-in-out .8s infinite}
+.v2-quick-icon svg,.v2-safety-symbol svg {animation:dc-heart-beat 7s ease-in-out 2s infinite}
+
+/* Header / navigation: stays one design system across public and members. */
+.dc-header {transition:box-shadow 280ms ease,background-color 280ms ease,backdrop-filter 280ms ease}
+.motion-scrolled .dc-header {box-shadow:0 13px 42px rgba(44,18,30,.11);background:rgba(255,255,255,.97)}
+.dc-logo-mark {transition:transform 320ms var(--motion-ease),box-shadow 320ms ease}
+.dc-logo:hover .dc-logo-mark {transform:rotate(-10deg) scale(1.09);box-shadow:0 10px 29px rgba(230,57,80,.32)}
+.dc-nav a {position:relative}
+.dc-nav a:not(.dc-mobile-join)::after {content:'';position:absolute;height:2px;border-radius:2px;background:currentColor;left:12px;right:12px;bottom:7px;transform:scaleX(0);transform-origin:left;transition:transform 280ms var(--motion-ease);opacity:.65}
+.dc-nav a.active::after,.dc-nav a:hover::after {transform:scaleX(1)}
+.dc-header .dc-join,.dc-header .dc-plus,.dc-account-trigger,.dc-menu-toggle {transition:transform 220ms var(--motion-ease),background 220ms ease,box-shadow 220ms ease}
+.dc-header .dc-join:hover,.dc-header .dc-plus:hover,.dc-account-trigger:hover {transform:translateY(-2px)}
+.dc-menu-toggle:active {transform:scale(.92)}
+.dc-account-menu {transform-origin:top right;animation:dc-pop-in 240ms var(--motion-ease) both}
+@media(max-width:850px) {.dc-nav.open {transform-origin:top;animation:dc-nav-drop 270ms var(--motion-ease) both}.dc-nav.open>a {animation:dc-fade-in 250ms ease both}.dc-nav.open>a:nth-child(2){animation-delay:35ms}.dc-nav.open>a:nth-child(3){animation-delay:70ms}.dc-nav.open>a:nth-child(4){animation-delay:105ms}.dc-nav.open>a:nth-child(5){animation-delay:140ms}}
+
+/* Hover affordances apply only to devices that actually support hover. */
+@media(hover:hover) and (pointer:fine) {
+  .v2-btn,.button,.dc-join {position:relative;overflow:hidden;isolation:isolate}
+  .v2-btn::after,.button.primary::after,.dc-join::after {content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(110deg,transparent 15%,rgba(255,255,255,.27) 47%,transparent 78%);transform:translateX(-155%) skewX(-15deg);transition:transform 650ms ease}
+  .v2-btn:hover::after,.button.primary:hover::after,.dc-join:hover::after {transform:translateX(155%) skewX(-15deg)}
+  .v2-btn svg,.button svg,.v2-text-link svg {transition:transform 260ms var(--motion-ease)}
+  .v2-btn:hover svg:last-child,.button:hover svg:last-child,.v2-text-link:hover svg {transform:translateX(4px)}
+  .v2-step,.v2-feature,.v2-about-values-grid article,.v2-content-card,.dc-member .panel,.dc-matches .person-tile,.dc-matches .person-row {transition:transform 320ms var(--motion-ease),box-shadow 320ms ease,border-color 250ms ease}
+  .v2-step:hover,.v2-feature:hover,.v2-about-values-grid article:hover,.v2-content-card:hover,.dc-matches .person-tile:hover {transform:translateY(-7px);box-shadow:0 25px 50px rgba(92,29,47,.14);border-color:#f5cbd5}
+  .v2-step-media,.v2-intro-art,.v2-teaser-photo,.v2-story-image,.v2-interior-visual,.v2-stories-inspiration,.v2-featured-card,.dc-matches .portrait-placeholder,.dc-member-gallery {overflow:hidden}
+  .v2-step-media img,.v2-intro-art img,.v2-teaser-photo img,.v2-stories-inspiration img,.v2-interior-visual img,.v2-featured-card img,.dc-matches .person-tile img,.dc-member-gallery img {transition:transform 850ms var(--motion-ease)}
+  .v2-step:hover img,.v2-intro-art:hover img,.v2-teaser-photo:hover img,.v2-stories-inspiration:hover img,.v2-interior-visual:hover img,.v2-featured-card:hover img,.dc-matches .person-tile:hover img,.dc-member-gallery img:hover {transform:scale(1.055)}
+  .v2-faq-list summary:hover {color:var(--v2-red-dark)}
+  .dc-messages .conversation-row:hover {transform:translateX(3px);background:#fff3f5}
+  .dc-discover .swipe:not(:disabled):hover {transform:translateY(-5px) scale(1.06)}
+  .dc-discover .swipe:not(:disabled):active {transform:translateY(0) scale(.95)}
+  .dc-footer-links a:hover {transform:translateX(4px)}
+}
+
+/* FAQ: accessible native details stay interactive without JS. */
+.v2-faq-list details {transition:background-color 260ms ease,border-color 260ms ease,box-shadow 260ms ease}
+.v2-faq-list details[open] {background:#fff8fa;box-shadow:0 12px 30px rgba(100,44,63,.045)}
+.v2-faq-plus {transition:transform 280ms var(--motion-ease),color 220ms ease}
+.v2-faq-list details[open] .v2-faq-plus {transform:rotate(45deg);color:var(--v2-red-dark)}
+.v2-faq-list details[open] p {animation:dc-reveal-up 340ms var(--motion-ease) both}
+
+/* Forms, status and interactive member controls. */
+input:not([type='checkbox']):not([type='radio']),select,textarea {transition:border-color 180ms ease,box-shadow 240ms ease,background-color 180ms ease,transform 180ms ease}
+input:not([type='checkbox']):not([type='radio']):focus-visible,select:focus-visible,textarea:focus-visible {border-color:var(--v2-red);box-shadow:0 0 0 4px rgba(230,57,80,.12);background-color:#fff}
+button:focus-visible,a:focus-visible,summary:focus-visible,[role='button']:focus-visible {outline:3px solid #E63950;outline-offset:4px}
+.button:not(:disabled):active,.v2-btn:active {transform:scale(.97)}
+.dc-discover .swipe,.dc-messages .conversation-row,.dc-member .section-tabs button {transition:background-color 220ms ease,box-shadow 220ms ease,transform 220ms var(--motion-ease),color 220ms ease}
+.dc-member .section-tabs button.current {position:relative}
+.dc-member .section-tabs button.current::after {content:'';position:absolute;bottom:-2px;left:0;right:0;height:3px;background:var(--v2-red);border-radius:3px;animation:dc-fade-in 230ms ease both}
+.dc-discover .discovery-hero[data-swipe-feedback='LIKE'] {animation:dc-feedback-like 290ms ease-in forwards}
+.dc-discover .discovery-hero[data-swipe-feedback='PASS'] {animation:dc-feedback-pass 290ms ease-in forwards}
+.dc-discover .discovery-hero[data-swipe-feedback='SUPER_LIKE'] {animation:dc-feedback-star 290ms ease-in forwards}
+.dc-discover .discovery-photo {animation:dc-fade-in 300ms ease both}
+.dc-matches .person-tile img {will-change:auto}
+.dc-messages .bubble-group {animation:dc-message-in 270ms var(--motion-ease) both}
+.dc-messages .message-bubble {transition:box-shadow 200ms ease}
+.dc-messages .message-bubble:hover {box-shadow:0 7px 21px rgba(82,31,50,.1)}
+.dc-messages .conversation-row.selected {box-shadow:inset 3px 0 var(--v2-red)}
+.dc-messages .composer:focus-within {box-shadow:0 -9px 30px rgba(179,48,76,.065)}
+.dc-messages .connection-status.online::before {animation:dc-heart-beat 4.5s ease-in-out infinite}
+.overlay {animation:dc-fade-in 180ms ease both}
+.modal {animation:dc-pop-in 260ms var(--motion-ease) both;transform-origin:center}
+.toast {animation:dc-toast-in 300ms var(--motion-ease) both}
+.empty,.failure,.premium-lock {animation:dc-reveal-up 380ms var(--motion-ease) both}
+/* Keep shimmer where already implemented; avoid forcing transforms on loading bars. */
+.v2-discover-skeleton,.v2-match-skeleton {animation:dc-fade-in 250ms ease both}
+
+/* Motion is optional, never prevents navigation or readability. */
+@media(prefers-reduced-motion:reduce) {
+  html {scroll-behavior:auto!important}
+  main#main-content,[data-motion-reveal],.v2-hero-photo,.v2-heart-stamp,
+  .v2-intro-floating,.v2-teaser-photo-label,.v2-quick-icon svg,.v2-safety-symbol svg,
+  .dc-messages .bubble-group,.dc-discover .discovery-hero,.dc-discover .discovery-photo,
+  .overlay,.modal,.toast,.empty,.failure {animation:none!important;transition:none!important}
+  .motion-enabled [data-motion-reveal] {opacity:1!important;transform:none!important}
+  .v2-hero .v2-heart-stamp {transform:rotate(-5deg)!important}
+  .v2-btn::after,.button::after,.dc-join::after {display:none!important}
+}
+/* First impression: stagger each hero line once, without moving the text on reflow. */
+.motion-enabled .v2-hero-copy.motion-inview > .v2-eyebrow {animation:dc-reveal-left 620ms var(--motion-ease) both}
+.motion-enabled .v2-hero-copy.motion-inview > h1 {animation:dc-reveal-up 780ms var(--motion-ease) 90ms both}
+.motion-enabled .v2-hero-copy.motion-inview > p {animation:dc-reveal-up 730ms var(--motion-ease) 170ms both}
+.motion-enabled .v2-hero-copy.motion-inview > .v2-hero-actions {animation:dc-reveal-up 730ms var(--motion-ease) 260ms both}
+.motion-enabled .v2-hero-copy.motion-inview > .v2-hero-assurance {animation:dc-fade-in 780ms ease 430ms both}
+@media(prefers-reduced-motion:reduce) {
+  .motion-enabled .v2-hero-copy.motion-inview > * {animation:none!important}
+}
+
+/* Revealed cards still lift on hover; observer transform must not win the cascade. */
+@media(hover:hover) and (pointer:fine) {
+  .motion-enabled [data-motion-reveal].motion-inview:is(.v2-step,.v2-feature,.v2-content-card,.person-tile,.v2-about-values-grid article):hover {transform:translate3d(0,-7px,0)}
+}
+.dc-typing-status {display:inline-flex;align-items:center;gap:7px}
+.dc-typing-dots {display:inline-flex;align-items:center;gap:3px;height:12px}
+.dc-typing-dots i {width:4px;height:4px;border-radius:50%;background:var(--v2-red);animation:dc-typing-bounce 950ms ease-in-out infinite}
+.dc-typing-dots i:nth-child(2){animation-delay:125ms}
+.dc-typing-dots i:nth-child(3){animation-delay:250ms}
+@media(prefers-reduced-motion:reduce){.dc-typing-dots i{animation:none!important;opacity:1}}
+
+/* Avoid compositing a full-screen photo continuously on small devices. */
+@media(max-width:680px){.v2-hero-photo{animation:none}}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Dating Cloud Motion V3: editorial depth, meaningful microinteractions.
+   This layer never changes routes, backend state or API responses.
+   ───────────────────────────────────────────────────────────────────── */
+@keyframes v3-drift-heart {
+  0% {opacity:0;transform:translate3d(0,18px,0) rotate(-18deg) scale(.65)}
+  18% {opacity:.52}
+  75% {opacity:.42}
+  100% {opacity:0;transform:translate3d(15px,-95px,0) rotate(22deg) scale(1.13)}
+}
+@keyframes v3-ribbon-move {to {transform:translate3d(-50%,0,0)}}
+@keyframes v3-image-unveil {from {clip-path:inset(0 75% 0 0 round 24px);filter:brightness(1.15)}to {clip-path:inset(0 0 0 0 round 24px);filter:brightness(1)}}
+@keyframes v3-shine-text {0%,100% {background-position:0% 50%}55% {background-position:100% 50%}}
+@keyframes v3-orbit-spin {to {transform:rotate(360deg)}}
+@keyframes v3-scroll-nudge {0%,100% {transform:translateY(0)}50% {transform:translateY(5px)}}
+@keyframes v3-ripple-spread {0% {opacity:.5;transform:scale(0)}80% {opacity:.16}100% {opacity:0;transform:scale(1)}}
+@keyframes v3-progress-bloom {from {opacity:0}to {opacity:1}}
+@keyframes v3-back-to-top-enter {from {opacity:0;transform:translateY(20px) scale(.89)}to {opacity:1;transform:translateY(0) scale(1)}}
+@keyframes v3-match-pop {0% {opacity:0;transform:translateY(15px) scale(.94)}70% {opacity:1;transform:translateY(-4px) scale(1.03)}100% {opacity:1;transform:translateY(0) scale(1)}}
+@keyframes v3-heart-burst {0% {opacity:0;transform:translate(-50%,-50%) scale(.2) rotate(0deg)}22% {opacity:1}100% {opacity:0;transform:translate(calc(-50% + var(--v3-x,0px)),calc(-50% + var(--v3-y,-140px))) scale(var(--v3-scale,1)) rotate(var(--v3-spin,90deg))}}
+@keyframes v3-breathe {0%,100% {box-shadow:0 0 0 0 rgba(230,57,80,.13)}50% {box-shadow:0 0 0 12px rgba(230,57,80,0)}}
+@keyframes v3-send-fly {0% {transform:translate(0,0) rotate(0)}45% {transform:translate(3px,-4px) rotate(-8deg)}100% {transform:translate(0,0) rotate(0)}}
+@keyframes v3-glow-drift {0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+
+/* Small live scroll indicator and a genuine keyboard-accessible return action. */
+.v3-reading-progress {pointer-events:none;position:fixed;top:0;left:0;right:0;height:4px;z-index:1100;overflow:hidden;animation:v3-progress-bloom .35s ease both}
+.v3-reading-progress>span {display:block;width:100%;height:100%;transform-origin:0 50%;transform:scaleX(0);background:linear-gradient(90deg,#ffb4c2,#e63950 55%,#af1f42);box-shadow:0 0 10px #e6395070}
+.v3-back-to-top {position:fixed;right:max(20px,env(safe-area-inset-right));bottom:max(24px,env(safe-area-inset-bottom));z-index:90;width:48px;height:48px;display:grid;place-items:center;border-radius:16px;border:1px solid #f2d5dc;background:#fff;color:#d52e4a;box-shadow:0 12px 34px rgba(94,26,48,.17);cursor:pointer;animation:v3-back-to-top-enter .35s var(--motion-ease) both;transition:background .2s,color .2s,box-shadow .2s}
+.v3-back-to-top:hover {background:#e63950;color:#fff;box-shadow:0 18px 42px #e6395050}
+.v3-back-to-top:focus-visible {outline:3px solid #e63950;outline-offset:4px}
+
+/* Above-the-fold atmosphere: deliberately sparse so photography remains legible. */
+.v3-hero-atmosphere {position:absolute;inset:0;pointer-events:none;z-index:-1;overflow:hidden}
+.v3-hero-atmosphere i {display:block;position:absolute;width:30px;height:30px;color:#ffd0da;opacity:0;animation:v3-drift-heart 10s ease-in-out infinite;font-style:normal;text-shadow:0 0 18px #fff3}
+.v3-hero-atmosphere i::before {content:'♥';font:normal 24px/1 Georgia,serif}
+.v3-hero-atmosphere i:nth-child(1){left:60%;top:68%;animation-delay:0s;font-size:22px}
+.v3-hero-atmosphere i:nth-child(2){left:79%;top:60%;animation-delay:2s;scale:.8}
+.v3-hero-atmosphere i:nth-child(3){left:90%;top:80%;animation-delay:4s;scale:.65}
+.v3-hero-atmosphere i:nth-child(4){left:66%;top:34%;animation-delay:7s;scale:.5}
+.v3-hero-atmosphere i:nth-child(5){left:85%;top:31%;animation-delay:5s;scale:1.1}
+.v3-hero-atmosphere i:nth-child(6){left:72%;top:83%;animation-delay:8s;scale:.75}
+.v3-hero-atmosphere i:nth-child(7){left:95%;top:48%;animation-delay:10s;scale:.62}
+.v2-hero h1 em {background:linear-gradient(115deg,#ffadbc 10%,#ffe3ea 47%,#ffb4c4 78%);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:v3-shine-text 8s ease-in-out infinite}
+.v3-scroll-cue {position:absolute;right:38px;bottom:25px;z-index:4;display:flex;gap:11px;align-items:center;color:#ffe8ee;font-size:10px;letter-spacing:2px;font-weight:800;text-decoration:none;transition:color .2s}
+.v3-scroll-cue:hover {color:#fff}
+.v3-scroll-cue svg {animation:v3-scroll-nudge 1.8s ease-in-out infinite}
+.v3-scroll-cue:focus-visible {outline:3px solid #fff;outline-offset:5px}
+
+/* Continuous, original-brand message ribbon: intentional decoration, not data. */
+.v3-love-ribbon {overflow:hidden;width:100%;padding:18px 0;background:linear-gradient(105deg,#b82747,#e63950 60%,#bc2a4a);color:#fff;position:relative}
+.v3-love-ribbon::before,.v3-love-ribbon::after {content:'';position:absolute;top:0;bottom:0;width:65px;z-index:1;pointer-events:none}
+.v3-love-ribbon::before {left:0;background:linear-gradient(90deg,#bd2c4b,transparent)}
+.v3-love-ribbon::after {right:0;background:linear-gradient(270deg,#bd2c4b,transparent)}
+.v3-love-ribbon-track {width:max-content;display:flex;animation:v3-ribbon-move 28s linear infinite}
+.v3-love-ribbon-segment {display:flex;flex:none;align-items:center;gap:34px;padding:0 36px;font-size:11px;letter-spacing:2px;font-weight:850;white-space:nowrap}
+.v3-love-ribbon-segment svg {opacity:.64;flex:none}
+@media(hover:hover) and (pointer:fine) {.v3-love-ribbon:hover .v3-love-ribbon-track {animation-play-state:paused}}
+
+/* Public narrative: image wipe, rotating trust orbit and restrained ambient color. */
+.motion-enabled .v2-intro-art.motion-inview>img {animation:v3-image-unveil 1.2s var(--motion-ease) both}
+.v2-safety-symbol .v2-safety-orbit {animation:v3-orbit-spin 35s linear infinite}
+.v2-quick-icon {animation:v3-breathe 4.8s ease-in-out infinite}
+.v2-interior-hero {background-size:180% 180%;animation:v3-glow-drift 24s ease-in-out infinite}
+.v2-steps-section {position:relative}
+.v2-step-media .v2-step-index {transition:transform .35s var(--motion-ease),background .3s ease}
+@media(hover:hover) and (pointer:fine){.v2-step:hover .v2-step-index {transform:translateY(-3px) rotate(-6deg)}}
+
+/* Interactive spotlight follows the pointer; no tilt or cursor trapping. */
+@media(hover:hover) and (pointer:fine) {
+ .v2-feature,.v2-content-card,.v2-step,.v2-about-values-grid article,.v2-featured-card,.dc-matches .person-tile {position:relative;isolation:isolate}
+ .v2-feature::after,.v2-content-card::after,.v2-step::after,.v2-about-values-grid article::after,.v2-featured-card::after,.dc-matches .person-tile::after {content:'';position:absolute;inset:0;z-index:2;border-radius:inherit;pointer-events:none;background:radial-gradient(380px circle at var(--v3-pointer-x,50%) var(--v3-pointer-y,50%),rgba(255,195,205,.19),transparent 68%);opacity:0;transition:opacity 320ms ease}
+ .v3-pointer-active::after {opacity:1!important}
+ .v2-hero-actions .v2-btn,.v2-quick .v2-btn,.v2-ending .v2-btn,.dc-header .dc-join {translate:var(--v3-magnet-x,0px) var(--v3-magnet-y,0px);transition:translate 180ms ease-out,transform 200ms ease,box-shadow 200ms ease,background 200ms ease}
+}
+.v2-btn,.dc-join,.dc-plus,.dc-menu-toggle,.dc-discover .swipe,.dc-member .button,.auth-card .button {position:relative;isolation:isolate;overflow:hidden}
+.v3-ink-ripple {position:absolute;z-index:10;display:block;pointer-events:none;border-radius:50%;background:rgba(230,57,80,.16);transform:scale(0);animation:v3-ripple-spread 650ms ease-out forwards}
+.v2-btn-primary .v3-ink-ripple,.dc-join .v3-ink-ripple,.dc-discover .swipe.like .v3-ink-ripple,.dc-member .button.primary .v3-ink-ripple {background:rgba(255,255,255,.35)}
+.dc-messages .composer button:not(:disabled):hover svg {animation:v3-send-fly .48s var(--motion-ease) both}
+.dc-messages .chat-window-header .avatar {transition:transform .3s var(--motion-ease)}
+.dc-messages .chat-window-header:hover .avatar {transform:scale(1.07)}
+.dc-discover .discovery-photo {animation:dc-fade-in .42s ease both}
+.dc-matches .unread-bubble,.dc-messages .unread-bubble {animation:v3-match-pop .45s var(--motion-ease) both}
+
+/* Celebrations only show for mutual matches confirmed by the server. */
+.v3-match-celebration {position:relative;isolation:isolate}
+.v3-match-celebration>.avatar {animation:v3-match-pop .8s var(--motion-ease) both}
+.v3-match-celebration>h2 {animation:dc-reveal-up .65s var(--motion-ease) .15s both}
+.v3-confetti {position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:4}
+.v3-confetti span {position:absolute;top:37%;left:50%;font-size:26px;color:#e63950;text-shadow:0 3px 14px #e639502e;animation:v3-heart-burst 1.35s cubic-bezier(.16,1,.3,1) both}
+.v3-confetti span:nth-child(1){--v3-x:-162px;--v3-y:-147px;--v3-spin:-110deg;animation-delay:60ms}
+.v3-confetti span:nth-child(2){--v3-x:-121px;--v3-y:-183px;--v3-spin:80deg;--v3-scale:.75;animation-delay:120ms}
+.v3-confetti span:nth-child(3){--v3-x:-81px;--v3-y:-126px;--v3-spin:-60deg;animation-delay:80ms}
+.v3-confetti span:nth-child(4){--v3-x:0px;--v3-y:-175px;--v3-spin:110deg;animation-delay:230ms}
+.v3-confetti span:nth-child(5){--v3-x:105px;--v3-y:-165px;--v3-spin:95deg;animation-delay:100ms}
+.v3-confetti span:nth-child(6){--v3-x:165px;--v3-y:-115px;--v3-spin:-180deg;animation-delay:190ms}
+.v3-confetti span:nth-child(7){--v3-x:142px;--v3-y:-22px;--v3-spin:95deg;--v3-scale:.72;animation-delay:240ms}
+.v3-confetti span:nth-child(8){--v3-x:-158px;--v3-y:5px;--v3-spin:120deg;animation-delay:140ms}
+.v3-confetti span:nth-child(9){--v3-x:-92px;--v3-y:84px;--v3-spin:-110deg;animation-delay:80ms}
+.v3-confetti span:nth-child(10){--v3-x:72px;--v3-y:75px;--v3-spin:70deg;animation-delay:200ms}
+.v3-confetti span:nth-child(11){--v3-x:23px;--v3-y:-117px;--v3-spin:180deg;--v3-scale:.65;animation-delay:150ms}
+.v3-confetti span:nth-child(12){--v3-x:-28px;--v3-y:105px;--v3-spin:-90deg;--v3-scale:.8;animation-delay:225ms}
+
+@media(max-width:900px) {
+ .v3-scroll-cue {display:none}
+ .v3-back-to-top {right:16px;bottom:max(20px,env(safe-area-inset-bottom))}
+ .v3-hero-atmosphere i {animation-duration:14s}
+}
+@media(max-width:680px) {
+ .v3-love-ribbon {padding:14px 0}
+ .v3-love-ribbon-segment {font-size:9px;gap:24px;padding:0 22px;letter-spacing:1.5px}
+ .v3-hero-atmosphere i:nth-child(n+5) {display:none}
+ .v3-hero-atmosphere i:nth-child(-n+4) {scale:.55}
+ .v3-back-to-top {width:43px;height:43px;border-radius:14px}
+ .v3-reading-progress {height:3px}
+}
+@media(prefers-reduced-motion:reduce) {
+ .v3-hero-atmosphere i,.v2-hero h1 em,.v3-scroll-cue svg,
+ .v3-love-ribbon-track,.v2-safety-symbol .v2-safety-orbit,
+ .v2-quick-icon,.v2-interior-hero,.v3-ink-ripple,
+ .v3-match-celebration>* ,.v3-confetti span,
+ .dc-messages .composer button svg,.dc-discover .discovery-photo,
+ .v3-back-to-top,.v3-reading-progress {animation:none!important;transition:none!important}
+ .motion-enabled .v2-intro-art.motion-inview>img {animation:none!important;clip-path:none!important;filter:none!important}
+ .v3-hero-atmosphere {display:none}
+ .v2-hero h1 em {-webkit-text-fill-color:#ffd0dc!important;background:none!important}
+ .v3-ink-ripple {display:none!important}
+ .v3-back-to-top {transform:none!important}
+}
