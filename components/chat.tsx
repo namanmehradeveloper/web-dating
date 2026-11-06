@@ -7,6 +7,7 @@ import {
 import { io, Socket } from 'socket.io-client';
 import { request, upload, uid, mediaUrl, messageOf } from '@/lib/api';
 import type { Conversation, ChatMessage } from '@/lib/types';
+import { CallOverlay, type ActiveCall, type AgoraCredentials, type CallInfo } from './call-overlay';
 import { Avatar, Button, Empty, Failure, Loading, Modal } from './ui';
 import { useApp } from './provider';
 
@@ -55,6 +56,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [socketOnline, setSocketOnline] = useState(false);
+  const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [typing, setTyping] = useState(false);
   const [options, setOptions] = useState(false);
   const [messageMenu, setMessageMenu] = useState<string | null>(null);
@@ -63,6 +65,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   const [details, setDetails] = useState('');
   const [alsoBlock, setAlsoBlock] = useState(true);
   const socketRef = useRef<Socket | null>(null);
+  const activeCallRef = useRef<ActiveCall | null>(null);
   const selectedRef = useRef<string | null>(selected);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
@@ -70,6 +73,21 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageRequestSeq = useRef(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const updateActiveCall = useCallback((next: ActiveCall | null) => {
+    activeCallRef.current = next;
+    setActiveCall(next);
+  }, []);
+
+  useEffect(() => () => {
+    const current = activeCallRef.current;
+    if (!current) return;
+    const action = current.call.status === 'RINGING'
+      ? current.direction === 'OUTGOING' ? 'cancel' : 'reject'
+      : 'end';
+    void request('POST', `/calls/${encodeURIComponent(current.call.id)}/${action}`)
+      .catch((error) => notify(`Could not close the call: ${messageOf(error)}`));
+  }, [notify]);
 
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const thread = threadRef.current;
@@ -163,6 +181,18 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
     socket.on('connect', () => {
       setSocketOnline(true);
       void load(false);
+      void request<{ call: CallInfo | null; direction: ActiveCall['direction'] | null; credentials: AgoraCredentials | null }>('GET', '/calls/active')
+        .then((result) => {
+          if (!result.call || !result.direction) return;
+          if (activeCallRef.current?.call.id === result.call.id) {
+            if (result.credentials && !activeCallRef.current.credentials) {
+              updateActiveCall({ ...activeCallRef.current, call: result.call, credentials: result.credentials });
+            }
+            return;
+          }
+          updateActiveCall({ call: result.call, direction: result.direction, credentials: result.credentials });
+        })
+        .catch((e) => notify(`Could not restore the active call: ${messageOf(e)}`));
       const id = selectedRef.current;
       if (id) {
         void request<{ items: ChatMessage[] }>('GET', `/conversations/${encodeURIComponent(id)}/messages?limit=50`)
@@ -227,12 +257,44 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
     });
     socket.on('match:new', () => void load(false));
     socket.on('match:removed', () => void load(false));
+    socket.on('call:incoming', ({ call }: { call: CallInfo }) => {
+      if (call.calleeId !== session.userId) return;
+      if (activeCallRef.current && activeCallRef.current.call.id !== call.id) {
+        notify('Another incoming call could not be shown while a call is active.');
+        return;
+      }
+      updateActiveCall({ call, direction: 'INCOMING', credentials: null });
+    });
+    socket.on('call:accepted', ({ call }: { call: CallInfo }) => {
+      const current = activeCallRef.current;
+      if (current?.call.id === call.id) {
+        updateActiveCall({ ...current, call });
+        if (!current.credentials) {
+          void request<{ call: CallInfo | null; credentials: AgoraCredentials | null }>('GET', '/calls/active')
+            .then((result) => {
+              if (result.call?.id === call.id && result.credentials && activeCallRef.current?.call.id === call.id) {
+                updateActiveCall({ ...activeCallRef.current, call: result.call, credentials: result.credentials });
+              }
+            })
+            .catch((e) => notify(`Could not restore the accepted call: ${messageOf(e)}`));
+        }
+      }
+    });
+    const finishCall = ({ call }: { call: CallInfo }, message: string) => {
+      if (activeCallRef.current?.call.id !== call.id) return;
+      updateActiveCall(null);
+      notify(message);
+    };
+    socket.on('call:rejected', (event: { call: CallInfo }) => finishCall(event, 'The call was declined.'));
+    socket.on('call:cancelled', (event: { call: CallInfo }) => finishCall(event, 'The call was cancelled.'));
+    socket.on('call:missed', (event: { call: CallInfo }) => finishCall(event, 'The call was missed.'));
+    socket.on('call:ended', (event: { call: CallInfo }) => finishCall(event, 'The call ended.'));
     return () => {
       socket.disconnect();
       socketRef.current = null;
       if (typingTimer.current) clearTimeout(typingTimer.current);
     };
-  }, [session?.userId, session?.accessToken, notify, load, go]);
+  }, [session?.userId, session?.accessToken, notify, load, go, updateActiveCall]);
 
   useEffect(() => {
     if (!stickToBottom.current) return;
@@ -374,6 +436,75 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
     inputRef.current?.focus();
   };
 
+  const startCall = async (type: 'AUDIO' | 'VIDEO') => {
+    if (!convo) return;
+    if (!socketRef.current?.connected) {
+      notify('Connect to live messaging before starting a call.');
+      return;
+    }
+    if (activeCallRef.current) {
+      notify('You are already in a call.');
+      return;
+    }
+    try {
+      const result = await request<{ call: CallInfo; credentials: AgoraCredentials | null }>('POST', '/calls', {
+        body: { conversationId: convo.id, type },
+      });
+      if (result.call.status === 'BUSY') {
+        notify(`${convo.otherUser.displayName} is busy right now.`);
+        return;
+      }
+      if (!result.credentials) throw new Error('The server did not return call credentials.');
+      updateActiveCall({ call: result.call, direction: 'OUTGOING', credentials: result.credentials });
+    } catch (e) {
+      notify(messageOf(e));
+    }
+  };
+
+  const acceptCall = async () => {
+    const current = activeCallRef.current;
+    if (!current) return;
+    try {
+      const result = await request<{ call: CallInfo; credentials: AgoraCredentials }>('POST', `/calls/${encodeURIComponent(current.call.id)}/accept`);
+      updateActiveCall({ ...current, call: result.call, credentials: result.credentials });
+    } catch (e) {
+      notify(messageOf(e));
+    }
+  };
+
+  const rejectCall = async () => {
+    const current = activeCallRef.current;
+    if (!current) return;
+    try {
+      await request('POST', `/calls/${encodeURIComponent(current.call.id)}/reject`);
+      updateActiveCall(null);
+    } catch (e) {
+      notify(messageOf(e));
+    }
+  };
+
+  const cancelCall = async () => {
+    const current = activeCallRef.current;
+    if (!current) return;
+    try {
+      await request('POST', `/calls/${encodeURIComponent(current.call.id)}/cancel`);
+      updateActiveCall(null);
+    } catch (e) {
+      notify(messageOf(e));
+    }
+  };
+
+  const endCall = async () => {
+    const current = activeCallRef.current;
+    if (!current) return;
+    try {
+      await request('POST', `/calls/${encodeURIComponent(current.call.id)}/end`);
+      updateActiveCall(null);
+    } catch (e) {
+      notify(messageOf(e));
+    }
+  };
+
   return (
     <div className="chat-page msg-dashboard">
       <div className="page-heading msg-heading">
@@ -488,8 +619,8 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                   </span>
                 </div>
                 <div className="msg-header-actions">
-                  <button type="button" className="msg-icon-btn" aria-label="Voice call" onClick={() => notify('Voice calls are coming soon.')}><Phone size={18} /></button>
-                  <button type="button" className="msg-icon-btn" aria-label="Video call" onClick={() => notify('Video calls are coming soon.')}><Video size={18} /></button>
+                  <button type="button" className="msg-icon-btn" aria-label="Voice call" onClick={() => void startCall('AUDIO')}><Phone size={18} /></button>
+                  <button type="button" className="msg-icon-btn" aria-label="Video call" onClick={() => void startCall('VIDEO')}><Video size={18} /></button>
                   <button
                     type="button"
                     className="msg-icon-btn"
@@ -707,6 +838,16 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
             <Button tone="danger" onClick={() => void reportAction()}><ShieldAlert size={16} /> Submit report</Button>
           </div>
         </Modal>
+      )}
+      {activeCall && (
+        <CallOverlay
+          activeCall={activeCall}
+          peerName={conversations.find((item) => item.id === activeCall.call.conversationId)?.otherUser.displayName || 'Dating Cloud member'}
+          onAccept={acceptCall}
+          onReject={rejectCall}
+          onCancel={cancelCall}
+          onEnd={endCall}
+        />
       )}
     </div>
   );
