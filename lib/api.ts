@@ -38,7 +38,6 @@ function backendOrigin() {
 /** Shared Axios client — browser calls the Express API directly (no Next.js proxy). */
 export const http: AxiosInstance = axios.create({
   baseURL: resolveApiBaseUrl(),
-  headers: { 'ngrok-skip-browser-warning': 'true' },
   // Handle every status in request(); 401 refresh must see the response body/status.
   validateStatus: () => true,
   // Parse JSON ourselves so HTML error pages become INVALID_RESPONSE.
@@ -56,8 +55,7 @@ function parsePayload(status: number, raw: unknown) {
   if (typeof raw === 'object' && raw !== null) return raw as any;
   try { return JSON.parse(String(raw)); }
   catch {
-    throw new ApiFailure(status, 'INVALID_RESPONSE',
-      `Server returned a non-JSON response (${status}). Check NEXT_PUBLIC_API_URL and that the backend is reachable.`);
+    throw new ApiFailure(status, 'INVALID_RESPONSE', 'Something went wrong. Please try again.');
   }
 }
 
@@ -110,7 +108,7 @@ export async function request<T = any>(method: string, path: string, options: { 
       data: options.form ?? options.body,
     });
   } catch {
-    throw networkFailure('Backend unreachable. Check NEXT_PUBLIC_API_URL and server status.');
+    throw networkFailure("Can't connect to the server. Please check your internet and try again.");
   }
 
   // Never deliver a previous user's response to a newly signed-in account.
