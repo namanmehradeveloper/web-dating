@@ -52,8 +52,8 @@ A Next.js 15 + React 19 + TypeScript website built from the supplied **Dating Ap
 
 1. Extract the ZIP, then open a terminal in the `dating-cloud-nextjs` folder.
 2. Copy `.env.example` to `.env.local`.
-3. Update `BACKEND_ORIGIN` and `NEXT_PUBLIC_SOCKET_ORIGIN` to match the **same backend**. For local development use `http://127.0.0.1:5050`; for your ngrok backend use its **current** HTTPS URL (not the stale URL from the API documentation).
-4. Check that `NEXT_PUBLIC_TERMS_VERSION` matches your backend setting.
+3. Set `NEXT_PUBLIC_API_URL` (e.g. `http://127.0.0.1:5050/api/v1`) and `NEXT_PUBLIC_SOCKET_ORIGIN` (e.g. `http://127.0.0.1:5050`) to the **same backend**. For deployed backends use the current HTTPS host (include `/api/v1` on the API URL).
+4. Check that `NEXT_PUBLIC_TERMS_VERSION` matches your backend setting. Ensure backend CORS lists this web origin (`WEB_URL` / `ADMIN_URL` / `CLIENT_URL`).
 5. Run:
 
 ```bash
@@ -76,13 +76,13 @@ npm run start
 
 ## How the backend connects
 
-The Next.js server proxies:
-- `/api/v1/*` => `${BACKEND_ORIGIN}/api/v1/*`
-- `/uploads/*` => `${BACKEND_ORIGIN}/uploads/*`
+The browser talks to the Express API **directly** (no Next.js rewrite/proxy):
 
-Client-side Socket.IO connects directly to `${NEXT_PUBLIC_SOCKET_ORIGIN}/v1` with `transports:['websocket']` and `auth: {token: accessToken}` per your API contract. Configure WebSocket support and CORS on the existing backend appropriately.
+- REST: Axios `baseURL` = `${NEXT_PUBLIC_API_URL}` (e.g. `https://api.example.com/api/v1`)
+- Uploads / media: absolute backend URLs (`NEXT_PUBLIC_SOCKET_ORIGIN` + `/uploads/...` when relative)
+- Socket.IO: `${NEXT_PUBLIC_SOCKET_ORIGIN}/v1` with `transports:['websocket']` and `auth: { token: accessToken }`
 
-`BACKEND_ORIGIN` is **server-side**; `NEXT_PUBLIC_SOCKET_ORIGIN` is intentionally visible in browser bundles. Never put private API secrets in public environment variables.
+Backend CORS must allow the web app origin (`WEB_URL`, or include it in `ADMIN_URL` / `CLIENT_URL`). `NEXT_PUBLIC_*` values are visible in the client bundle — never put private API secrets there.
 
 ## Screens
 

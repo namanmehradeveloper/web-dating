@@ -18,13 +18,30 @@ export function configureSession(session: Session | null, callback?: (value: Ses
 export function currentUserId() { return currentSession?.userId; }
 function updateSession(session: Session | null) { currentSession = session; onSessionChange?.(session); }
 
-/** Shared Axios client — baseURL hits the Next.js rewrite to the backend. */
+function resolveApiBaseUrl() {
+  const configured = (process.env.NEXT_PUBLIC_API_URL || '').trim().replace(/\/$/, '');
+  if (configured) return configured;
+  // Local default when env is missing (dev only).
+  return 'http://127.0.0.1:5050/api/v1';
+}
+
+function backendOrigin() {
+  const socket = (process.env.NEXT_PUBLIC_SOCKET_ORIGIN || '').trim().replace(/\/$/, '');
+  if (socket) return socket;
+  try {
+    return new URL(resolveApiBaseUrl()).origin;
+  } catch {
+    return 'http://127.0.0.1:5050';
+  }
+}
+
+/** Shared Axios client — browser calls the Express API directly (no Next.js proxy). */
 export const http: AxiosInstance = axios.create({
-  baseURL: '/api/v1',
+  baseURL: resolveApiBaseUrl(),
   headers: { 'ngrok-skip-browser-warning': 'true' },
   // Handle every status in request(); 401 refresh must see the response body/status.
   validateStatus: () => true,
-  // Parse JSON ourselves so HTML proxy/ngrok pages become INVALID_RESPONSE.
+  // Parse JSON ourselves so HTML error pages become INVALID_RESPONSE.
   transformResponse: [(data) => data],
   responseType: 'text',
 });
@@ -39,9 +56,8 @@ function parsePayload(status: number, raw: unknown) {
   if (typeof raw === 'object' && raw !== null) return raw as any;
   try { return JSON.parse(String(raw)); }
   catch {
-    // For example: a reverse proxy or ngrok can return an HTML error page.
     throw new ApiFailure(status, 'INVALID_RESPONSE',
-      `Server returned a non-JSON response (${status}). Check BACKEND_ORIGIN and the backend proxy.`);
+      `Server returned a non-JSON response (${status}). Check NEXT_PUBLIC_API_URL and that the backend is reachable.`);
   }
 }
 
@@ -94,7 +110,7 @@ export async function request<T = any>(method: string, path: string, options: { 
       data: options.form ?? options.body,
     });
   } catch {
-    throw networkFailure('Backend unreachable. Check BACKEND_ORIGIN and server status.');
+    throw networkFailure('Backend unreachable. Check NEXT_PUBLIC_API_URL and server status.');
   }
 
   // Never deliver a previous user's response to a newly signed-in account.
@@ -127,10 +143,17 @@ export async function upload(file: File, purpose: 'PROFILE_PHOTO' | 'CHAT_ATTACH
 
 export function mediaUrl(url?: string) {
   if (!url) return '';
-  // Use first-party rewrite for locally hosted backend media; do not turn arbitrary external URLs into proxy paths.
-  if (url.startsWith('/uploads/')) return url;
-  try { const parsed = new URL(url); if (parsed.pathname.startsWith('/uploads/')) return `${parsed.pathname}${parsed.search}`; return /^https?:$/.test(parsed.protocol) ? url : ''; }
-  catch { return url.startsWith('/') ? url : ''; }
+  const origin = backendOrigin();
+  // Relative upload paths must hit the API host directly (no Next rewrite).
+  if (url.startsWith('/uploads/')) return `${origin}${url}`;
+  try {
+    const parsed = new URL(url);
+    if (/^https?:$/.test(parsed.protocol)) return url;
+    if (parsed.pathname.startsWith('/uploads/')) return `${origin}${parsed.pathname}${parsed.search}`;
+    return '';
+  } catch {
+    return url.startsWith('/') ? `${origin}${url}` : '';
+  }
 }
 
 export const uid = () => crypto.randomUUID();
