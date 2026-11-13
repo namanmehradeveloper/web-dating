@@ -63,6 +63,22 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
   }, [call.id]);
 
   useEffect(() => {
+    if (call.status !== 'RINGING') return;
+
+    const audio = new Audio(direction === 'INCOMING' ? '/sounds/ringtone.mp3' : '/sounds/ringback.mp3');
+    audio.loop = true;
+    audio.volume = direction === 'INCOMING' ? 0.85 : 0.65;
+    void audio.play().catch(() => {
+      // Autoplay may be blocked until a user gesture; ringing UI still works.
+    });
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+    };
+  }, [call.id, call.status, direction]);
+
+  useEffect(() => {
     if (!credentials || call.status !== 'ACCEPTED') return;
 
     let disposed = false;
