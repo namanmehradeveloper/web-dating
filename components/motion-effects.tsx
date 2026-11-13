@@ -13,7 +13,7 @@ const targets = [
   '.v2-interior-headline','.v2-interior-visual','.v2-about-mission-grid > div',
   '.v2-about-values-grid > article','.v2-content-card','.v2-stories-grid > div',
   '.v2-interior-section-heading','.v2-interior-cta-grid','.v2-faq-layout > div',
-  '.v2-featured-card','.page-heading','.v5-member-nav','.discovery-hero',
+  '.v2-featured-card','.page-heading','.discovery-hero',
   '.aside-feature','.mini-advice','.person-tile','.person-row','.panel',
   '.chat-layout','.v2-profile-hero','.dc-member-detail','.premium-hero','.price-card',
   '.bottom-prompt','.auth-visual-copy','.auth-card','.onboarding-card',
