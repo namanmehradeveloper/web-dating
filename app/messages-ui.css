@@ -204,6 +204,29 @@
   color:#b08f9c;
   border:1px dashed #e0c8d1;
 }
+.dc-messages .message-bubble.msg-call{
+  min-width:148px;
+  padding:11px 14px;
+}
+.dc-messages .msg-call-body{
+  display:flex;align-items:center;gap:10px;font-weight:550;letter-spacing:.01em;
+}
+.dc-messages .msg-call-icon{
+  width:30px;height:30px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex:none;
+  background:rgba(255,255,255,.18);
+}
+.dc-messages .msg-bubble-row.theirs .msg-call-icon{
+  background:#f6ebf0;color:var(--msg-plum);
+}
+.dc-messages .msg-bubble-row.theirs .message-bubble.msg-call-missed{
+  color:#b42318;
+}
+.dc-messages .msg-bubble-row.theirs .message-bubble.msg-call-missed .msg-call-icon{
+  background:#fdecec;color:#b42318;
+}
+.dc-messages .msg-bubble-row.mine .message-bubble.msg-call-missed .msg-call-icon{
+  background:rgba(255,255,255,.22);
+}
 .dc-messages .msg-bubble-menu-btn{
   border:0;background:transparent;color:inherit;padding:0;display:inline-flex;cursor:pointer;opacity:.7;
 }

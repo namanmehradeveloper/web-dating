@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { request, upload, uid, mediaUrl, messageOf } from '@/lib/api';
-import type { Conversation, ChatMessage } from '@/lib/types';
+import type { Conversation, ChatMessage, ChatCallLog } from '@/lib/types';
 import { CallOverlay, type ActiveCall, type AgoraCredentials, type CallInfo } from './call-overlay';
 import { Avatar, Button, Empty, Failure, Loading, Modal } from './ui';
 import { useApp } from './provider';
@@ -51,8 +51,41 @@ function formatLastSeen(iso?: string | null) {
   return `Last seen ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
 }
 
-function previewText(conversation: Conversation) {
+function formatCallDuration(seconds: number) {
+  const total = Math.max(0, Math.floor(seconds));
+  const hrs = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hrs > 0) return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function callLogLabel(call: ChatCallLog, viewerIsCaller: boolean) {
+  const kind = call.type === 'VIDEO' ? 'Video' : 'Voice';
+  switch (call.status) {
+    case 'ENDED':
+      return call.durationSeconds != null
+        ? `${kind} call · ${formatCallDuration(call.durationSeconds)}`
+        : `${kind} call`;
+    case 'MISSED':
+      return viewerIsCaller ? 'No answer' : `Missed ${kind.toLowerCase()} call`;
+    case 'REJECTED':
+      return viewerIsCaller ? 'Declined' : `Declined ${kind.toLowerCase()} call`;
+    case 'CANCELLED':
+      return viewerIsCaller ? 'Cancelled' : `Cancelled ${kind.toLowerCase()} call`;
+    case 'BUSY':
+      return 'Busy';
+    default:
+      return `${kind} call`;
+  }
+}
+
+function previewText(conversation: Conversation, viewerId?: string) {
   if (conversation.lastMessage?.status === 'UNSENT') return 'This message was deleted';
+  if (conversation.lastMessage?.call) {
+    const viewerIsCaller = Boolean(viewerId && conversation.lastMessage.senderId === viewerId);
+    return callLogLabel(conversation.lastMessage.call, viewerIsCaller);
+  }
   if (conversation.lastMessage?.text) return conversation.lastMessage.text;
   if (conversation.lastMessage?.attachment) return '📷 Photo';
   return 'Start the conversation!';
@@ -645,7 +678,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                     <strong>{c.otherUser.displayName}</strong>
                     <time>{formatListTime(c.lastMessage?.sentAt)}</time>
                   </span>
-                  <small>{previewText(c)}</small>
+                  <small>{previewText(c, session?.userId)}</small>
                 </span>
                 {c.unreadCount > 0 && <span className="unread-bubble">{c.unreadCount}</span>}
               </button>
@@ -745,17 +778,25 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                     const mine = msg.senderId === session?.userId;
                     const unsent = msg.status === 'UNSENT';
                     const menuOpen = messageMenu === msg.id;
+                    const call = msg.call;
+                    const CallIcon = call?.type === 'VIDEO' ? Video : Phone;
+                    const callMissed = call && call.status !== 'ENDED' && call.status !== 'BUSY';
                     return (
-                      <div key={msg.id} className={`bubble-group msg-bubble-row ${mine ? 'mine' : 'theirs'}`}>
+                      <div key={msg.id} className={`bubble-group msg-bubble-row ${mine ? 'mine' : 'theirs'}${call ? ' msg-call-row' : ''}`}>
                         {!mine && (
                           <span className="msg-bubble-avatar">
                             <Avatar user={convo.otherUser} size={28} />
                           </span>
                         )}
                         <div className="msg-bubble-stack">
-                          <div className={`message-bubble ${unsent ? 'msg-unsent' : ''}`}>
+                          <div className={`message-bubble ${unsent ? 'msg-unsent' : ''}${call && !unsent ? ' msg-call' : ''}${callMissed ? ' msg-call-missed' : ''}`}>
                             {unsent ? (
                               <em>This message was deleted</em>
+                            ) : call ? (
+                              <div className="msg-call-body">
+                                <span className="msg-call-icon" aria-hidden="true"><CallIcon size={16} /></span>
+                                <span>{callLogLabel(call, mine)}</span>
+                              </div>
                             ) : (
                               <>
                                 {msg.attachment && (
@@ -790,7 +831,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                                   Delete for everyone
                                 </button>
                               )}
-                              {!mine && (
+                              {!mine && !call && (
                                 <button
                                   type="button"
                                   role="menuitem"

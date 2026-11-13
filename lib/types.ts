@@ -15,9 +15,15 @@ export type Member = {
   lastSeenAt?: string | null;
 };
 export type Match = { id: string; conversationId: string; otherUser: Member; createdAt?: string };
+export type ChatCallLog = {
+  callId: string;
+  type: 'AUDIO' | 'VIDEO';
+  status: 'REJECTED' | 'CANCELLED' | 'MISSED' | 'BUSY' | 'ENDED';
+  durationSeconds?: number | null;
+};
 export type ChatMessage = {
   id: string; conversationId: string; senderId: string; text?: string;
-  attachment?: Photo; status?: string; sentAt: string; unsentAt?: string;
+  attachment?: Photo; call?: ChatCallLog | null; status?: string; sentAt: string; unsentAt?: string;
   clientMessageId?: string | null;
 };
 export type Conversation = {
