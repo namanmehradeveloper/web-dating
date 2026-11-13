@@ -12,6 +12,31 @@ type AppContextType = {
 };
 const Context = createContext<AppContextType | null>(null);
 const KEY = 'dating_cloud_web_session';
+
+function parseSession(raw: string | null): Session | null {
+  if (!raw) return null;
+  try {
+    const stored = JSON.parse(raw);
+    if (stored && typeof stored.accessToken === 'string' && typeof stored.refreshToken === 'string' && typeof stored.userId === 'string') {
+      return stored as Session;
+    }
+  } catch { /* empty */ }
+  return null;
+}
+
+function readStoredSession(): Session | null {
+  if (typeof window === 'undefined') return null;
+  const fromLocal = parseSession(localStorage.getItem(KEY));
+  if (fromLocal) return fromLocal;
+  // One-time migrate: older builds kept the session in sessionStorage (per-tab only).
+  const fromSession = parseSession(sessionStorage.getItem(KEY));
+  if (fromSession) {
+    localStorage.setItem(KEY, JSON.stringify(fromSession));
+    sessionStorage.removeItem(KEY);
+  }
+  return fromSession;
+}
+
 export function AppProvider({children}: {children: React.ReactNode}) {
   const [session, setSession] = useState<Session | null>(null);
   const [me, setMe] = useState<Member | null>(null);
@@ -25,8 +50,10 @@ export function AppProvider({children}: {children: React.ReactNode}) {
     activeUser.current = value?.userId || null;
     setSession(value);
     if (typeof window !== 'undefined') {
-      if (value) sessionStorage.setItem(KEY, JSON.stringify(value));
-      else sessionStorage.removeItem(KEY);
+      if (value) localStorage.setItem(KEY, JSON.stringify(value));
+      else localStorage.removeItem(KEY);
+      // Clear any leftover per-tab copy from older builds.
+      sessionStorage.removeItem(KEY);
     }
     if (!value) {
       setMe(null);
@@ -37,16 +64,32 @@ export function AppProvider({children}: {children: React.ReactNode}) {
     }
   }, []);
   useEffect(() => {
-    let restored: Session | null = null;
-    try {
-      const stored = JSON.parse(sessionStorage.getItem(KEY) || 'null');
-      if (stored && typeof stored.accessToken === 'string' && typeof stored.refreshToken === 'string' && typeof stored.userId === 'string') restored = stored;
-    } catch { /* empty */ }
+    const restored = readStoredSession();
     activeUser.current = restored?.userId || null;
     configureSession(restored, assign);
     setSession(restored);
     if (restored) setMeStatus('loading');
     setReady(true);
+  }, [assign]);
+  // Keep other Member Web tabs in sync when login/logout/token refresh writes localStorage.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== KEY || event.storageArea !== localStorage) return;
+      const next = parseSession(event.newValue);
+      const previousUser = activeUser.current;
+      activeUser.current = next?.userId || null;
+      configureSession(next, assign);
+      setSession(next);
+      if (!next) {
+        setMe(null);
+        setMeStatus('idle');
+      } else if (next.userId !== previousUser) {
+        setMe(null);
+        setMeStatus('loading');
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, [assign]);
   useEffect(() => { configureSession(session, assign); }, [session, assign]);
   const reloadMe = useCallback(async () => {
