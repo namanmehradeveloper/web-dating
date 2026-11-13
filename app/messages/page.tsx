@@ -1,2 +1,3 @@
-import {MemberRoute} from '@/components/member-route';
-export default function Page(){return <MemberRoute section='messages'/>}
+export default function Page(){
+  return null;
+}

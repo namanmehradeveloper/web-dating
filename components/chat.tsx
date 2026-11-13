@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Send, ImagePlus, MoreVertical, MessageSquare, Search, ShieldAlert, Ban, Flag,
   Check, CheckCheck, Heart, Phone, Video, Plus, Gift, Smile, Trash2, ChevronDown, Paperclip,
@@ -167,10 +168,14 @@ function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
   return Math.abs(Date.parse(current.sentAt) - Date.parse(prev.sentAt)) <= GROUP_GAP_MS;
 }
 
-export function Chat({ requestedConversation, go }: { requestedConversation?: string | null; go: (p: string) => void }) {
+export function Chat({ go }: { go: (p: string) => void }) {
   const { session, notify } = useApp();
+  const pathname = usePathname();
+  const query = useSearchParams();
+  const pathConversation = pathname.match(/^\/messages\/([^/?#]+)/)?.[1] || null;
+  const requestedConversation = pathConversation || query.get('conversation') || null;
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selected, setSelected] = useState<string | null>(requestedConversation || null);
+  const [selected, setSelected] = useState<string | null>(requestedConversation);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState('');
   const [search, setSearch] = useState('');
@@ -181,7 +186,8 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   const [msgLoading, setMsgLoading] = useState(false);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
-  const [socketOnline, setSocketOnline] = useState(false);
+  /** connecting = first join; online = live; offline = dropped after a successful connect */
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [typing, setTyping] = useState(false);
   const [options, setOptions] = useState(false);
@@ -204,11 +210,28 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composingRef = useRef(false);
   const prevMessageCount = useRef(0);
+  const notifyRef = useRef(notify);
+  const loadRef = useRef<(showLoader?: boolean) => Promise<void>>(async () => {});
+  const goRef = useRef(go);
+  const updateActiveCallRef = useRef<(next: ActiveCall | null) => void>(() => {});
+  const tokenRef = useRef(session?.accessToken);
+  const everConnected = useRef(false);
 
   const updateActiveCall = useCallback((next: ActiveCall | null) => {
     activeCallRef.current = next;
     setActiveCall(next);
   }, []);
+
+  useEffect(() => { notifyRef.current = notify; }, [notify]);
+  useEffect(() => { goRef.current = go; }, [go]);
+  useEffect(() => { updateActiveCallRef.current = updateActiveCall; }, [updateActiveCall]);
+  useEffect(() => {
+    tokenRef.current = session?.accessToken;
+    const socket = socketRef.current;
+    if (socket && session?.accessToken) {
+      socket.auth = { token: session.accessToken };
+    }
+  }, [session?.accessToken]);
 
   useEffect(() => () => {
     const current = activeCallRef.current;
@@ -217,8 +240,8 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
       ? current.direction === 'OUTGOING' ? 'cancel' : 'reject'
       : 'end';
     void request('POST', `/calls/${encodeURIComponent(current.call.id)}/${action}`)
-      .catch((error) => notify(`Could not close the call: ${messageOf(error)}`));
-  }, [notify]);
+      .catch((error) => notifyRef.current(`Could not close the call: ${messageOf(error)}`));
+  }, []);
 
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const thread = threadRef.current;
@@ -293,6 +316,8 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
     }
   }, []);
 
+  useEffect(() => { loadRef.current = load; }, [load]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -325,30 +350,36 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   }, [selected, open]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session?.userId || !session.accessToken) return;
+    const userId = session.userId;
     const origin = process.env.NEXT_PUBLIC_SOCKET_ORIGIN || 'http://127.0.0.1:5050';
+    everConnected.current = false;
+    setLiveStatus('connecting');
     const socket = io(`${origin.replace(/\/$/, '')}/v1`, {
       transports: ['websocket'],
       autoConnect: true,
-      auth: { token: session.accessToken },
-      reconnectionAttempts: 5,
+      auth: { token: tokenRef.current || session.accessToken },
+      reconnectionAttempts: 8,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
     });
     socketRef.current = socket;
     socket.on('connect', () => {
-      setSocketOnline(true);
-      void load(false);
+      everConnected.current = true;
+      setLiveStatus('online');
+      void loadRef.current(false);
       void request<{ call: CallInfo | null; direction: ActiveCall['direction'] | null; credentials: AgoraCredentials | null }>('GET', '/calls/active')
         .then((result) => {
           if (!result.call || !result.direction) return;
           if (activeCallRef.current?.call.id === result.call.id) {
             if (result.credentials && !activeCallRef.current.credentials) {
-              updateActiveCall({ ...activeCallRef.current, call: result.call, credentials: result.credentials });
+              updateActiveCallRef.current({ ...activeCallRef.current, call: result.call, credentials: result.credentials });
             }
             return;
           }
-          updateActiveCall({ call: result.call, direction: result.direction, credentials: result.credentials });
+          updateActiveCallRef.current({ call: result.call, direction: result.direction, credentials: result.credentials });
         })
-        .catch((e) => notify(`Could not restore the active call: ${messageOf(e)}`));
+        .catch((e) => notifyRef.current(`Could not restore the active call: ${messageOf(e)}`));
       const id = selectedRef.current;
       if (id) {
         void request<{ items: ChatMessage[] }>('GET', `/conversations/${encodeURIComponent(id)}/messages?limit=50`)
@@ -358,26 +389,28 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
           .catch(() => {});
       }
     });
-    socket.on('disconnect', () => setSocketOnline(false));
+    socket.on('disconnect', () => {
+      setLiveStatus(everConnected.current ? 'offline' : 'connecting');
+    });
     socket.on('connect_error', (e) => {
-      setSocketOnline(false);
-      if (e.message !== 'websocket error') notify(`Live chat: ${e.message}`);
+      setLiveStatus(everConnected.current ? 'offline' : 'connecting');
+      if (e.message !== 'websocket error') notifyRef.current(`Live chat: ${e.message}`);
     });
     socket.on('session:expired', () => {
-      setSocketOnline(false);
-      notify('Live session expired. Reload to reconnect with a refreshed token.');
+      setLiveStatus('offline');
+      notifyRef.current('Live session expired. Reload to reconnect with a refreshed token.');
     });
     socket.on('message:new', ({ message }: { message: ChatMessage }) => {
       if (selectedRef.current === message.conversationId) {
         setMessages((current) => mergeMessages(current, [message]));
-        if (!stickToBottom.current && message.senderId !== session.userId) {
+        if (!stickToBottom.current && message.senderId !== userId) {
           setNewBelow((n) => n + 1);
         }
-        if (message.senderId !== session.userId && message.status !== 'UNSENT') {
+        if (message.senderId !== userId && message.status !== 'UNSENT') {
           socket.emit('message:read', { conversationId: message.conversationId, upToMessageId: message.id });
         }
       }
-      void load(false);
+      void loadRef.current(false);
     });
     socket.on('message:read', () => {
       const id = selectedRef.current;
@@ -393,19 +426,19 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
       if (selectedRef.current === conversationId) {
         setMessages((current) => current.filter((message) => message.id !== messageId));
       }
-      void load(false);
+      void loadRef.current(false);
     });
     socket.on('message:unsent', ({ conversationId, message }: { conversationId: string; message: ChatMessage }) => {
       if (selectedRef.current === conversationId) {
         setMessages((current) => mergeMessages(current, [message]));
       }
-      void load(false);
+      void loadRef.current(false);
     });
     socket.on('conversation:deleted', ({ conversationId }: { conversationId: string }) => {
       setConversations((current) => current.filter((conversation) => conversation.id !== conversationId));
       if (selectedRef.current === conversationId) {
         setSelected(null);
-        go('/messages');
+        goRef.current('/messages');
       }
     });
     socket.on('typing', ({ conversationId, isTyping }: { conversationId: string; isTyping: boolean }) => {
@@ -429,35 +462,35 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
     socket.on('user:offline', (payload: { userId: string; lastSeenAt?: string | null }) => {
       onPresenceUpdate({ userId: payload.userId, isOnline: false, lastSeenAt: payload.lastSeenAt ?? null });
     });
-    socket.on('match:new', () => void load(false));
-    socket.on('match:removed', () => void load(false));
+    socket.on('match:new', () => void loadRef.current(false));
+    socket.on('match:removed', () => void loadRef.current(false));
     socket.on('call:incoming', ({ call }: { call: CallInfo }) => {
-      if (call.calleeId !== session.userId) return;
+      if (call.calleeId !== userId) return;
       if (activeCallRef.current && activeCallRef.current.call.id !== call.id) {
-        notify('Another incoming call could not be shown while a call is active.');
+        notifyRef.current('Another incoming call could not be shown while a call is active.');
         return;
       }
-      updateActiveCall({ call, direction: 'INCOMING', credentials: null });
+      updateActiveCallRef.current({ call, direction: 'INCOMING', credentials: null });
     });
     socket.on('call:accepted', ({ call }: { call: CallInfo }) => {
       const current = activeCallRef.current;
       if (current?.call.id === call.id) {
-        updateActiveCall({ ...current, call });
+        updateActiveCallRef.current({ ...current, call });
         if (!current.credentials) {
           void request<{ call: CallInfo | null; credentials: AgoraCredentials | null }>('GET', '/calls/active')
             .then((result) => {
               if (result.call?.id === call.id && result.credentials && activeCallRef.current?.call.id === call.id) {
-                updateActiveCall({ ...activeCallRef.current, call: result.call, credentials: result.credentials });
+                updateActiveCallRef.current({ ...activeCallRef.current, call: result.call, credentials: result.credentials });
               }
             })
-            .catch((e) => notify(`Could not restore the accepted call: ${messageOf(e)}`));
+            .catch((e) => notifyRef.current(`Could not restore the accepted call: ${messageOf(e)}`));
         }
       }
     });
     const finishCall = ({ call }: { call: CallInfo }, message: string) => {
       if (activeCallRef.current?.call.id !== call.id) return;
-      updateActiveCall(null);
-      notify(message);
+      updateActiveCallRef.current(null);
+      notifyRef.current(message);
     };
     socket.on('call:rejected', (event: { call: CallInfo }) => finishCall(event, 'The call was declined.'));
     socket.on('call:cancelled', (event: { call: CallInfo }) => finishCall(event, 'The call was cancelled.'));
@@ -468,7 +501,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
       socketRef.current = null;
       if (typingTimer.current) clearTimeout(typingTimer.current);
     };
-  }, [session?.userId, session?.accessToken, notify, load, go, updateActiveCall]);
+  }, [session?.userId]);
 
   useEffect(() => {
     if (msgLoading) return;
@@ -704,10 +737,14 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
 
   return (
     <div className="chat-page msg-dashboard">
-      {!socketOnline && (
+      {liveStatus === 'offline' && (
         <div className="msg-reconnect" role="status">
           <span>Reconnecting to live messaging…</span>
-          <button type="button" onClick={() => void load(false)}>Retry</button>
+          <button type="button" onClick={() => {
+            const socket = socketRef.current;
+            if (socket && !socket.connected) socket.connect();
+            void load(false);
+          }}>Retry</button>
         </div>
       )}
 
