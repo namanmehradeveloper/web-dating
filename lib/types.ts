@@ -10,6 +10,9 @@ export type Member = {
   interestIds?: string[]; preferences?: { minAge?: number; maxAge?: number; maxDistanceKm?: number; showMe?: string };
   basics?: Record<string, string>; prompt?: { promptId?: string; answer?: string };
   alreadySwiped?: boolean;
+  /** Peer presence from chat API / socket events — not the current user's connection. */
+  isOnline?: boolean;
+  lastSeenAt?: string | null;
 };
 export type Match = { id: string; conversationId: string; otherUser: Member; createdAt?: string };
 export type ChatMessage = {

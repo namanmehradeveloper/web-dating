@@ -111,8 +111,11 @@
 .dc-messages .msg-avatar-wrap{position:relative;flex:none;display:inline-grid}
 .dc-messages .msg-presence{
   position:absolute;right:1px;bottom:1px;width:11px;height:11px;border-radius:50%;
-  background:var(--msg-online);border:2px solid #fff;
+  background:#b9aeb6;border:2px solid #fff;
 }
+.dc-messages .msg-presence.online{background:var(--msg-online)}
+.dc-messages .msg-presence.offline{background:#b9aeb6}
+.dc-messages .msg-status-away{color:var(--msg-muted);font-weight:650}
 .dc-messages .msg-row-copy{min-width:0;flex:1}
 .dc-messages .msg-row-top{
   display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:4px;

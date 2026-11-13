@@ -14,7 +14,9 @@ import { useApp } from './provider';
 const reasons = ['FAKE_PROFILE', 'INAPPROPRIATE_PHOTOS', 'HARASSMENT', 'SPAM_OR_SCAM', 'UNDERAGE', 'OFFLINE_BEHAVIOUR', 'OTHER'];
 const QUICK_EMOJI = ['😊', '❤️', '😂', '🔥', '👍', '🥰'];
 
-type ListFilter = 'all' | 'unread';
+type ListFilter = 'all' | 'unread' | 'online';
+
+type PresencePayload = { userId: string; isOnline: boolean; lastSeenAt?: string | null };
 
 function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]) {
   const messages = new Map(current.map((message) => [message.id, message]));
@@ -35,11 +37,46 @@ function formatListTime(iso?: string) {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+function formatLastSeen(iso?: string | null) {
+  if (!iso) return 'Offline';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Offline';
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return `Last seen ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return `Last seen yesterday ${time}`;
+  return `Last seen ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+}
+
 function previewText(conversation: Conversation) {
   if (conversation.lastMessage?.status === 'UNSENT') return 'This message was deleted';
   if (conversation.lastMessage?.text) return conversation.lastMessage.text;
   if (conversation.lastMessage?.attachment) return '📷 Photo';
   return 'Start the conversation!';
+}
+
+function applyPeerPresence(conversations: Conversation[], payload: PresencePayload) {
+  return conversations.map((conversation) => {
+    if (conversation.otherUser.id !== payload.userId) return conversation;
+    return {
+      ...conversation,
+      otherUser: {
+        ...conversation.otherUser,
+        isOnline: payload.isOnline,
+        lastSeenAt: payload.isOnline ? null : (payload.lastSeenAt ?? conversation.otherUser.lastSeenAt ?? null),
+      },
+    };
+  });
+}
+
+function peerStatusLabel(peer: Conversation['otherUser'] | undefined, typing: boolean) {
+  if (!peer) return 'Messages available';
+  if (typing) return 'Typing…';
+  if (peer.isOnline) return 'Online';
+  return formatLastSeen(peer.lastSeenAt);
 }
 
 export function Chat({ requestedConversation, go }: { requestedConversation?: string | null; go: (p: string) => void }) {
@@ -255,6 +292,21 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
       setTyping(isTyping);
       if (isTyping) typingTimer.current = setTimeout(() => setTyping(false), 4000);
     });
+    const onPresenceUpdate = (payload: PresencePayload) => {
+      if (!payload?.userId) return;
+      setConversations((current) => applyPeerPresence(current, {
+        userId: payload.userId,
+        isOnline: Boolean(payload.isOnline),
+        lastSeenAt: payload.lastSeenAt ?? null,
+      }));
+    };
+    socket.on('presence:update', onPresenceUpdate);
+    socket.on('user:online', (payload: { userId: string; lastSeenAt?: string | null }) => {
+      onPresenceUpdate({ userId: payload.userId, isOnline: true, lastSeenAt: null });
+    });
+    socket.on('user:offline', (payload: { userId: string; lastSeenAt?: string | null }) => {
+      onPresenceUpdate({ userId: payload.userId, isOnline: false, lastSeenAt: payload.lastSeenAt ?? null });
+    });
     socket.on('match:new', () => void load(false));
     socket.on('match:removed', () => void load(false));
     socket.on('call:incoming', ({ call }: { call: CallInfo }) => {
@@ -306,16 +358,23 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
     [conversations],
   );
 
+  const onlineCount = useMemo(
+    () => conversations.filter((c) => c.otherUser.isOnline).length,
+    [conversations],
+  );
+
   const visibleConversations = useMemo(() => {
     const q = search.trim().toLowerCase();
     return conversations.filter((c) => {
       if (listFilter === 'unread' && !(c.unreadCount > 0)) return false;
+      if (listFilter === 'online' && !c.otherUser.isOnline) return false;
       if (!q) return true;
       return c.otherUser.displayName?.toLowerCase().includes(q);
     });
   }, [conversations, listFilter, search]);
 
   const convo = conversations.find((c) => c.id === selected);
+  const peerOnline = Boolean(convo?.otherUser.isOnline);
 
   const submit = async (attachment?: File) => {
     if (sending || (!text.trim() && !attachment) || !selected) return;
@@ -548,8 +607,16 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                 Unread{unreadTotal > 0 && <span className="msg-tab-badge">{unreadTotal > 99 ? '99+' : unreadTotal}</span>}
               </button>
               <button type="button" className="soon" onClick={() => notify('Favourites are coming soon.')}>Favourites</button>
-              <button type="button" className="soon" onClick={() => notify('Online status filters are coming soon.')}>
-                Online<span className="msg-online-dot" aria-hidden="true" />
+              <button
+                type="button"
+                role="tab"
+                aria-selected={listFilter === 'online'}
+                className={listFilter === 'online' ? 'active' : ''}
+                onClick={() => setListFilter('online')}
+              >
+                Online
+                <span className="msg-online-dot" aria-hidden="true" />
+                {onlineCount > 0 && <span className="msg-tab-badge">{onlineCount > 99 ? '99+' : onlineCount}</span>}
               </button>
             </div>
           </div>
@@ -567,7 +634,11 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
               >
                 <span className="msg-avatar-wrap">
                   <Avatar user={c.otherUser} size={48} />
-                  {socketOnline && <span className="msg-presence" aria-hidden="true" />}
+                  <span
+                    className={`msg-presence ${c.otherUser.isOnline ? 'online' : 'offline'}`}
+                    title={c.otherUser.isOnline ? 'Online' : 'Offline'}
+                    aria-hidden="true"
+                  />
                 </span>
                 <span className="conversation-preview msg-row-copy">
                   <span className="msg-row-top">
@@ -581,8 +652,20 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
             ))}
             {!loading && !error && visibleConversations.length === 0 && (
               <Empty
-                title={listFilter === 'unread' ? 'No unread chats' : 'No conversations'}
-                detail={listFilter === 'unread' ? 'You are all caught up.' : 'When you match with someone, say hello!'}
+                title={
+                  listFilter === 'unread'
+                    ? 'No unread chats'
+                    : listFilter === 'online'
+                      ? 'No one is online'
+                      : 'No conversations'
+                }
+                detail={
+                  listFilter === 'unread'
+                    ? 'You are all caught up.'
+                    : listFilter === 'online'
+                      ? 'Matches currently online will show up here.'
+                      : 'When you match with someone, say hello!'
+                }
               />
             )}
           </div>
@@ -610,12 +693,16 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                 </button>
                 <span className="msg-avatar-wrap">
                   <Avatar user={convo.otherUser} size={46} />
-                  {socketOnline && <span className="msg-presence" aria-hidden="true" />}
+                  <span
+                    className={`msg-presence ${peerOnline ? 'online' : 'offline'}`}
+                    title={peerOnline ? 'Online' : 'Offline'}
+                    aria-hidden="true"
+                  />
                 </span>
                 <div className="chat-window-person">
                   <strong>{convo.otherUser.displayName}</strong>
-                  <span className={socketOnline ? 'msg-status-live' : ''}>
-                    {typing ? 'Typing…' : socketOnline ? 'Online' : 'Messages available'}
+                  <span className={typing || peerOnline ? 'msg-status-live' : 'msg-status-away'}>
+                    {peerStatusLabel(convo.otherUser, typing)}
                   </span>
                 </div>
                 <div className="msg-header-actions">
