@@ -26,6 +26,56 @@ export type Conversation = {
 };
 export type Like = { id?: string; user: Member; action: string; likedAt?: string };
 export type Notification = { id: string; title?: string; body?: string; message?: string; type?: string; isRead?: boolean; readAt?: string; createdAt?: string };
-export type Product = { id: string; title: string; description?: string; priceLabel?: string; period?: string };
-export type Entitlement = { tier?: string; isActive?: boolean; expiresAt?: string; willRenew?: boolean };
+export type Product = {
+  id: string;
+  title: string;
+  description?: string;
+  priceLabel?: string;
+  period?: string;
+  tier?: string;
+  amountMinor?: number;
+  currency?: string;
+};
+export type Entitlement = {
+  tier?: string;
+  isActive?: boolean;
+  expiresAt?: string | null;
+  willRenew?: boolean;
+  platform?: string | null;
+  provider?: string | null;
+  environment?: string | null;
+};
+export type CheckoutSession = {
+  id?: string;
+  checkoutId: string;
+  provider: string;
+  environment: string;
+  productId: string;
+  platform: string;
+  amountMinor: number;
+  currency: string;
+  status: string;
+  period: string;
+  isDemo?: boolean;
+  clientPayload?: {
+    mode?: string;
+    simulateOutcomes?: string[];
+    instructions?: string;
+  } | null;
+  checkoutExpiresAt?: string | null;
+};
+export type PaymentHistoryItem = {
+  id: string;
+  checkoutId: string;
+  provider: string;
+  environment: string;
+  productId: string;
+  status: string;
+  amountMinor: number;
+  currency: string;
+  isDemo?: boolean;
+  createdAt?: string;
+  verifiedAt?: string | null;
+  failureReason?: string | null;
+};
 export type Ticket = { id: string; subject: string; category: string; status: string; createdAt: string; messages: { author: string; body: string }[] };

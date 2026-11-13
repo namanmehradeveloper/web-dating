@@ -13,8 +13,64 @@ export function Notifications(){const {notify}=useApp();const {data,loading,erro
  return <div><Heading label="STAY IN THE LOOP" title="Notifications" description="Never miss a connection."/><div className="two-panel"><Panel title="Your notifications" subtitle="All the latest updates in one place.">{loading?<Loading/>:error?<p className="field-error">{error}</p>:data?.items?.length?data.items.map(n=><button key={n.id} className={`notification-row ${!n.isRead&&!n.readAt?'unread':''}`} onClick={()=>void read(n.id)}><span className="notification-icon"><BellRing size={18}/></span><span><strong>{n.title||n.type||'Notification'}</strong><small>{n.body||n.message||''}</small><small>{n.createdAt?new Date(n.createdAt).toLocaleString():''}</small></span>{!n.isRead&&!n.readAt&&<span className="notification-dot"/>}</button>):<Empty title="All caught up" detail="Your notifications will appear here."/>}</Panel>
  <Panel title="Notification preferences" subtitle="Choose which updates to receive.">{prefs.loading?<Loading/>:['newMatches','messages','likes','promotions'].map(k=><label key={k} className="setting-row"><span><strong>{({newMatches:'New matches',messages:'Messages',likes:'Likes',promotions:'Offers and updates'} as Record<string,string>)[k]}</strong></span><input type="checkbox" checked={Boolean(prefs.data?.[k])} onChange={e=>void change(k,e.target.checked)} disabled={!prefs.data}/></label>)}</Panel></div></div>
 }
-export function Premium(){const plans=useGet<{items:Product[]}>('/subscriptions/products');const entitlement=useGet<Entitlement>('/subscriptions/entitlement');
- return <div><Heading label="MORE WAYS TO CONNECT" title="Dating Cloud Plus" description="Unlock more possibilities with premium features."/><div className="premium-hero"><Crown size={32}/><span>ENJOY MORE CONNECTIONS</span><h2>Love the possibilities.</h2><p>Explore more ways to connect. Available plans are shown below; purchases will be available soon.</p></div><div className="plan-grid">{plans.loading?<Loading/>:plans.error?<p className="field-error">{plans.error}</p>:plans.data?.items.map(p=><section key={p.id} className="price-card"><Crown size={23}/><h2>{p.title}</h2><p>{p.description}</p><h3>{p.priceLabel||'See store price'}<small>{p.period?` / ${p.period.toLowerCase()}`:''}</small></h3><Button disabled className="full">Purchases coming soon</Button></section>)}</div><div className="notice-line"><Shield size={20}/><div><strong>Current membership: {entitlement.data?.tier||'Free'}</strong><p>Purchases are currently unavailable. You can continue exploring with your current membership.</p></div></div></div>;
+export function Premium(){
+  const {notify}=useApp();
+  const plans=useGet<{items:Product[];billing?:{configured?:boolean;provider?:string}}>('/subscriptions/products');
+  const entitlement=useGet<Entitlement>('/subscriptions/entitlement');
+  const history=useGet<{items:import('@/lib/types').PaymentHistoryItem[]}>('/subscriptions/history?limit=10');
+  const [busyId,setBusyId]=useState('');
+  const billing=plans.data?.billing;
+  const isPlus=Boolean(entitlement.data?.isActive&&entitlement.data?.tier==='PLUS');
+
+  const refreshAll=async()=>{await Promise.all([plans.refresh(),entitlement.refresh(),history.refresh()])};
+
+  const buy=async(productId:string,outcome:'SUCCESS'|'FAILURE')=>{
+    setBusyId(`${productId}:${outcome}`);
+    try{
+      const checkout=await request<import('@/lib/types').CheckoutSession>('POST','/subscriptions/checkout',{body:{productId,platform:'WEB',idempotencyKey:crypto.randomUUID()}});
+      const result=await request<{entitlement:Entitlement;payment:{status:string;isDemo?:boolean}}>('POST','/subscriptions/verify',{body:{checkoutId:checkout.checkoutId,providerProof:{outcome}}});
+      if(result.payment.status==='SUCCEEDED')notify(result.payment.isDemo?'Demo Plus activated.':'Plus activated.');
+      else notify('Payment failed. You were not charged.');
+      await refreshAll();
+    }catch(e){notify(messageOf(e))}
+    finally{setBusyId('')}
+  };
+
+  const cancel=async()=>{
+    setBusyId('cancel');
+    try{await request('POST','/subscriptions/cancel',{body:{}});notify('Auto-renew turned off. Plus stays active until it expires.');await refreshAll()}
+    catch(e){notify(messageOf(e))}
+    finally{setBusyId('')}
+  };
+
+  return <div>
+    <Heading label="MORE WAYS TO CONNECT" title="Dating Cloud Plus" description="Unlock more possibilities with premium features."/>
+    <div className="premium-hero"><Crown size={32}/><span>ENJOY MORE CONNECTIONS</span><h2>Love the possibilities.</h2>
+      <p>{billing?.configured?`Payments run through the ${billing.provider||'configured'} provider. Demo charges are simulated and never real money.`:'Billing is not configured on this server yet.'}</p>
+    </div>
+    <div className="plan-grid">{plans.loading?<Loading/>:plans.error?<p className="field-error">{plans.error}</p>:plans.data?.items.map(p=>
+      <section key={p.id} className="price-card"><Crown size={23}/><h2>{p.title}</h2><p>{p.description}</p>
+        <h3>{p.priceLabel||'See store price'}<small>{p.period?` / ${p.period.toLowerCase()}`:''}</small></h3>
+        {billing?.configured&&billing.provider==='demo'?<div className="stack">
+          <Button disabled={Boolean(busyId)} className="full" onClick={()=>void buy(p.id,'SUCCESS')}>{busyId===`${p.id}:SUCCESS`?'Activating…':'Simulate successful purchase'}</Button>
+          <Button tone="outline" disabled={Boolean(busyId)} className="full" onClick={()=>void buy(p.id,'FAILURE')}>{busyId===`${p.id}:FAILURE`?'Simulating…':'Simulate failed purchase'}</Button>
+        </div>:<Button disabled className="full">Purchases unavailable</Button>}
+      </section>
+    )}</div>
+    <div className="notice-line"><Shield size={20}/><div>
+      <strong>Current membership: {entitlement.data?.tier||'Free'}{isPlus?' · Active':''}</strong>
+      <p>{isPlus?`Renews: ${entitlement.data?.willRenew?'yes':'no'}${entitlement.data?.expiresAt?` · Expires ${new Date(entitlement.data.expiresAt).toLocaleString()}`:''}${entitlement.data?.provider?` · Provider ${entitlement.data.provider}`:''}${entitlement.data?.environment==='demo'?' · DEMO':''}`:'Choose a plan above to unlock unlimited likes, see who likes you, and undo.'}</p>
+      {isPlus&&entitlement.data?.willRenew?<Button tone="outline" disabled={busyId==='cancel'} onClick={()=>void cancel()}>{busyId==='cancel'?'Cancelling…':'Cancel auto-renew'}</Button>:null}
+    </div></div>
+    <Panel title="Payment history" subtitle="Server-verified transactions for this account.">
+      {history.loading?<Loading/>:history.error?<p className="field-error">{history.error}</p>:history.data?.items?.length?history.data.items.map(item=>
+        <div key={item.id} className="setting-row">
+          <span><strong>{item.productId}</strong><small className="muted"> · {item.status}{item.isDemo?' · DEMO':''} · {(item.amountMinor/100).toLocaleString(undefined,{style:'currency',currency:item.currency||'INR'})}</small></span>
+          <small className="muted">{item.createdAt?new Date(item.createdAt).toLocaleString():''}</small>
+        </div>
+      ):<Empty title="No payments yet" detail="Successful and failed checkouts will appear here."/>}
+    </Panel>
+  </div>;
 }
 export function Help(){const {notify}=useApp();const faqs=useGet<{items:{id?:string;question:string;answer:string}[]}>('/support/faqs');const [category,setCategory]=useState('ACCOUNT');const[subject,setSubject]=useState('');const[body,setBody]=useState('');const [sending,setSending]=useState(false);const[tickets,setTickets]=useState<Ticket[]>([]);const{session}=useApp();
  useEffect(()=>{if(!session)return;let keys:string[]=[];try{keys=JSON.parse(localStorage.getItem(`dating_tickets_${session.userId}`)||'[]')}catch{};void Promise.all(keys.map(id=>request<Ticket>('GET',`/support/tickets/${id}`).catch(()=>null))).then(rows=>setTickets(rows.filter((x):x is Ticket=>Boolean(x))))},[session?.userId]);

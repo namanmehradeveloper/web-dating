@@ -338,21 +338,23 @@ For \`POST /swipes\` and \`POST /conversations/:id/messages\`:
 
 
 
-\### E. Purchase Plus (when stores are wired)
+\### E. Purchase Plus (provider-independent)
 
 
 
-1\. \`GET /subscriptions/products\` for paywall UI  
+1\. \`GET /subscriptions/products\` for paywall UI (includes \`billing\` status)  
 
-2\. Complete App Store / Play purchase in the app  
+2\. \`POST /subscriptions/checkout\` with \`productId\` + \`platform\` (\`WEB\` \| \`IOS\` \| \`ANDROID\`)  
 
-3\. \`POST /subscriptions/verify\` with store proof  
+3\. Complete provider payment UI (demo: skip UI and call verify with simulated outcome)  
 
-4\. \`GET /subscriptions/entitlement\` to refresh features  
+4\. \`POST /subscriptions/verify\` with \`checkoutId\` + provider proof  
+
+5\. \`GET /subscriptions/entitlement\` (or listen for socket \`entitlement:updated\`)  
 
 
 
-\> Note: verify/restore currently return \*\*501\*\* until store verification is configured on the server.
+\> Demo provider is enabled in development. Razorpay is a future adapter — same contracts. Legacy store-style verify bodies still validate then return \`501\` until a store adapter exists. See \`backend/docs/SUBSCRIPTIONS_PAYMENTS.md\`.
 
 
 
@@ -1522,35 +1524,47 @@ Call after login and after a successful purchase/restore.
 
 
 
-\### \`POST /subscriptions/verify\`
+\### \`POST /subscriptions/checkout\`
 
 
 
-Submit a store purchase for server verification.
-
-
-
-\*\*Rate limit:\*\* 20 per hour  
+Start a provider checkout session.
 
 
 
 \`\`\`json
 
-{
-
-  "platform": "IOS",
-
-  "productId": "dc_plus_monthly",
-
-  "transactionProof": "..."
-
-}
+{ "productId": "dc_plus_monthly", "platform": "WEB", "idempotencyKey": "optional-uuid" }
 
 \`\`\`
 
 
 
-\> Currently returns \*\*501\*\* until Apple/Google verification is configured on the server. Request shape is already validated.
+\---
+
+
+
+\### \`POST /subscriptions/verify\`
+
+
+
+Server-side verification. Preferred body uses a checkout session:
+
+
+
+\*\*Rate limit:\*\* 40 per hour  
+
+
+
+\`\`\`json
+
+{ "checkoutId": "chk_…", "providerProof": { "outcome": "SUCCESS" } }
+
+\`\`\`
+
+
+
+Demo \`providerProof.outcome\`: \`SUCCESS\` \| \`FAILURE\`. Legacy store body (\`platform\` + \`productId\` + \`transactionProof\`) still validates then returns \`501\`.
 
 
 
@@ -1562,11 +1576,11 @@ Submit a store purchase for server verification.
 
 
 
-Restore previous purchases.
+Restore previous purchases (demo: from payment ledger; stores: provider proofs).
 
 
 
-\*\*Rate limit:\*\* 10 per hour  
+\*\*Rate limit:\*\* 10 per hour  
 
 
 
@@ -1872,11 +1886,19 @@ Acks look like \`{ ok: true }\` or \`{ ok: false, error: { code, message } }\`.
 
 \| PATCH | \`/notification-preferences\` | Yes | Update prefs |
 
-\| GET | \`/subscriptions/products\` | Yes | Paywall |
+\| GET | \`/subscriptions/products\` | Yes | Paywall + billing status |
 
 \| GET | \`/subscriptions/entitlement\` | Yes | Tier |
 
-\| POST | \`/subscriptions/verify\` | Yes | 501 until configured |
+\| POST | \`/subscriptions/checkout\` | Yes | Start checkout |
+
+\| POST | \`/subscriptions/verify\` | Yes | Verify + activate |
+
+\| POST | \`/subscriptions/cancel\` | Yes | Stop auto-renew |
+
+\| GET | \`/subscriptions/history\` | Yes | Payment ledger |
+
+\| POST | \`/subscriptions/webhooks/:provider\` | No | Provider webhooks |
 
 \| POST | \`/subscriptions/restore\` | Yes | 501 until configured |
 
