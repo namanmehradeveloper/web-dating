@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   ArrowLeft, Send, ImagePlus, MoreVertical, MessageSquare, Search, ShieldAlert, Ban, Flag,
-  CheckCheck, Heart, Phone, Video, Plus, Gift, Smile, SlidersHorizontal, Trash2,
+  Check, CheckCheck, Heart, Phone, Video, Plus, Gift, Smile, Trash2, ChevronDown, Paperclip,
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { request, upload, uid, mediaUrl, messageOf } from '@/lib/api';
@@ -13,10 +13,36 @@ import { useApp } from './provider';
 
 const reasons = ['FAKE_PROFILE', 'INAPPROPRIATE_PHOTOS', 'HARASSMENT', 'SPAM_OR_SCAM', 'UNDERAGE', 'OFFLINE_BEHAVIOUR', 'OTHER'];
 const QUICK_EMOJI = ['😊', '❤️', '😂', '🔥', '👍', '🥰'];
+const DRAFT_PREFIX = 'dc-msg-draft:';
+const GROUP_GAP_MS = 5 * 60 * 1000;
 
-type ListFilter = 'all' | 'unread' | 'online';
+type ListFilter = 'all' | 'unread' | 'favourites' | 'online';
 
 type PresencePayload = { userId: string; isOnline: boolean; lastSeenAt?: string | null };
+
+function draftKey(conversationId: string) {
+  return `${DRAFT_PREFIX}${conversationId}`;
+}
+
+function readDraft(conversationId: string | null) {
+  if (!conversationId || typeof window === 'undefined') return '';
+  try {
+    return sessionStorage.getItem(draftKey(conversationId)) || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeDraft(conversationId: string | null, value: string) {
+  if (!conversationId || typeof window === 'undefined') return;
+  try {
+    const key = draftKey(conversationId);
+    if (value) sessionStorage.setItem(key, value);
+    else sessionStorage.removeItem(key);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]) {
   const messages = new Map(current.map((message) => [message.id, message]));
@@ -49,6 +75,17 @@ function formatLastSeen(iso?: string | null) {
   yesterday.setDate(now.getDate() - 1);
   if (date.toDateString() === yesterday.toDateString()) return `Last seen yesterday ${time}`;
   return `Last seen ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+}
+
+function formatDayLabel(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return 'Today';
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
 }
 
 function formatCallDuration(seconds: number) {
@@ -112,6 +149,24 @@ function peerStatusLabel(peer: Conversation['otherUser'] | undefined, typing: bo
   return formatLastSeen(peer.lastSeenAt);
 }
 
+function deliveryIcon(status?: string) {
+  if (status === 'READ' || status === 'SEEN') return <CheckCheck size={12} aria-label="Read" />;
+  if (status === 'DELIVERED') return <CheckCheck size={12} aria-label="Delivered" />;
+  return <Check size={12} aria-label="Sent" />;
+}
+
+function sameDay(a: string, b: string) {
+  return new Date(a).toDateString() === new Date(b).toDateString();
+}
+
+function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
+  if (!prev) return false;
+  if (prev.senderId !== current.senderId) return false;
+  if (prev.status === 'UNSENT' || current.status === 'UNSENT') return false;
+  if (prev.call || current.call) return false;
+  return Math.abs(Date.parse(current.sentAt) - Date.parse(prev.sentAt)) <= GROUP_GAP_MS;
+}
+
 export function Chat({ requestedConversation, go }: { requestedConversation?: string | null; go: (p: string) => void }) {
   const { session, notify } = useApp();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -121,6 +176,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   const [search, setSearch] = useState('');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [msgLoading, setMsgLoading] = useState(false);
   const [error, setError] = useState('');
@@ -134,6 +190,8 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   const [reason, setReason] = useState(reasons[0]);
   const [details, setDetails] = useState('');
   const [alsoBlock, setAlsoBlock] = useState(true);
+  const [newBelow, setNewBelow] = useState(0);
+  const [atBottom, setAtBottom] = useState(true);
   const socketRef = useRef<Socket | null>(null);
   const activeCallRef = useRef<ActiveCall | null>(null);
   const selectedRef = useRef<string | null>(selected);
@@ -142,7 +200,10 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   const typingAt = useRef(0);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageRequestSeq = useRef(0);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const composingRef = useRef(false);
+  const prevMessageCount = useRef(0);
 
   const updateActiveCall = useCallback((next: ActiveCall | null) => {
     activeCallRef.current = next;
@@ -164,32 +225,57 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
     if (!thread) return;
     const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     thread.scrollTo({ top: thread.scrollHeight, behavior: reduceMotion ? 'auto' : behavior });
+    stickToBottom.current = true;
+    setAtBottom(true);
+    setNewBelow(0);
   }, []);
 
   const onThreadScroll = useCallback(() => {
     const thread = threadRef.current;
     if (!thread) return;
     const distance = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
-    stickToBottom.current = distance < 80;
+    const nearBottom = distance < 80;
+    stickToBottom.current = nearBottom;
+    setAtBottom(nearBottom);
+    if (nearBottom) setNewBelow(0);
+  }, []);
+
+  const resizeComposer = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = '0px';
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 44), 120)}px`;
   }, []);
 
   useEffect(() => {
     selectedRef.current = selected;
     stickToBottom.current = true;
+    setAtBottom(true);
+    setNewBelow(0);
     setTyping(false);
     setEmojiOpen(false);
+    setAttachOpen(false);
     if (typingTimer.current) clearTimeout(typingTimer.current);
     setOptions(false);
     setMessageMenu(null);
+    prevMessageCount.current = 0;
     if (!selected) {
       messageRequestSeq.current++;
       setMessages([]);
+      setText('');
+    } else {
+      setText(readDraft(selected));
     }
   }, [selected]);
 
   useEffect(() => {
     setSelected(requestedConversation || null);
   }, [requestedConversation]);
+
+  useEffect(() => {
+    writeDraft(selected, text);
+    resizeComposer();
+  }, [text, selected, resizeComposer]);
 
   const load = useCallback(async (showLoader = true) => {
     if (showLoader) {
@@ -284,6 +370,9 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
     socket.on('message:new', ({ message }: { message: ChatMessage }) => {
       if (selectedRef.current === message.conversationId) {
         setMessages((current) => mergeMessages(current, [message]));
+        if (!stickToBottom.current && message.senderId !== session.userId) {
+          setNewBelow((n) => n + 1);
+        }
         if (message.senderId !== session.userId && message.status !== 'UNSENT') {
           socket.emit('message:read', { conversationId: message.conversationId, upToMessageId: message.id });
         }
@@ -382,9 +471,20 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
   }, [session?.userId, session?.accessToken, notify, load, go, updateActiveCall]);
 
   useEffect(() => {
+    if (msgLoading) return;
+    const count = messages.length;
+    const grew = count > prevMessageCount.current;
+    prevMessageCount.current = count;
     if (!stickToBottom.current) return;
-    scrollThreadToBottom(messages.length > 12 ? 'smooth' : 'auto');
+    if (!grew && !typing) return;
+    scrollThreadToBottom(count > 12 ? 'smooth' : 'auto');
   }, [messages, typing, msgLoading, scrollThreadToBottom]);
+
+  useEffect(() => {
+    if (!msgLoading && messages.length > 0 && stickToBottom.current) {
+      scrollThreadToBottom('auto');
+    }
+  }, [msgLoading, selected, messages.length, scrollThreadToBottom]);
 
   const unreadTotal = useMemo(
     () => conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
@@ -401,6 +501,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
     return conversations.filter((c) => {
       if (listFilter === 'unread' && !(c.unreadCount > 0)) return false;
       if (listFilter === 'online' && !c.otherUser.isOnline) return false;
+      if (listFilter === 'favourites') return false;
       if (!q) return true;
       return c.otherUser.displayName?.toLowerCase().includes(q);
     });
@@ -408,6 +509,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
 
   const convo = conversations.find((c) => c.id === selected);
   const peerOnline = Boolean(convo?.otherUser.isOnline);
+  const canSend = Boolean(text.trim()) && !sending && Boolean(selected);
 
   const submit = async (attachment?: File) => {
     if (sending || (!text.trim() && !attachment) || !selected) return;
@@ -430,9 +532,12 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
         setMessages((current) => mergeMessages(current, [data]));
       }
       setText('');
+      writeDraft(conversationId, '');
       setEmojiOpen(false);
+      setAttachOpen(false);
       socketRef.current?.emit('typing', { conversationId, isTyping: false });
       void load(false);
+      requestAnimationFrame(() => scrollThreadToBottom('smooth'));
     } catch (e) {
       notify(messageOf(e));
     } finally {
@@ -599,23 +704,28 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
 
   return (
     <div className="chat-page msg-dashboard">
-      <div className="page-heading msg-heading">
-        <div>
-          <span className="overline purple">YOUR CONVERSATIONS</span>
-          <h1>Messages<span className="title-dot">.</span></h1>
-          <p>Meaningful conversations, real connections.</p>
+      {!socketOnline && (
+        <div className="msg-reconnect" role="status">
+          <span>Reconnecting to live messaging…</span>
+          <button type="button" onClick={() => void load(false)}>Retry</button>
         </div>
-        <div className="chat-heading-actions">
-          <Button tone="outline" onClick={() => go('/matches')}><MessageSquare size={15} /> New message</Button>
-          <span className={`connection-status ${socketOnline ? 'online' : ''}`}>
-            {socketOnline ? 'Live connection' : 'Connecting / offline'}
-          </span>
-        </div>
-      </div>
+      )}
 
       <div className="chat-layout msg-shell">
-        <div className={`conversations msg-sidebar ${selected ? 'hidden-mobile' : ''}`}>
+        <aside className={`conversations msg-sidebar ${selected ? 'hidden-mobile' : ''}`} aria-label="Conversations">
           <div className="msg-sidebar-top">
+            <div className="msg-sidebar-heading">
+              <h1>Messages</h1>
+              <button
+                type="button"
+                className="msg-compose-btn"
+                aria-label="New message"
+                onClick={() => go('/matches')}
+              >
+                <MessageSquare size={16} />
+                <span>New</span>
+              </button>
+            </div>
             <div className="chat-search msg-search">
               <Search size={17} aria-hidden="true" />
               <input
@@ -624,22 +734,24 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
-              <button
-                type="button"
-                className="msg-icon-btn quiet"
-                aria-label="Conversation filters"
-                title="Filters"
-                onClick={() => notify('Use the tabs below to filter unread chats.')}
-              >
-                <SlidersHorizontal size={16} />
-              </button>
             </div>
             <div className="msg-filter-tabs" role="tablist" aria-label="Conversation filters">
               <button type="button" role="tab" aria-selected={listFilter === 'all'} className={listFilter === 'all' ? 'active' : ''} onClick={() => setListFilter('all')}>All</button>
               <button type="button" role="tab" aria-selected={listFilter === 'unread'} className={listFilter === 'unread' ? 'active' : ''} onClick={() => setListFilter('unread')}>
                 Unread{unreadTotal > 0 && <span className="msg-tab-badge">{unreadTotal > 99 ? '99+' : unreadTotal}</span>}
               </button>
-              <button type="button" className="soon" onClick={() => notify('Favourites are coming soon.')}>Favourites</button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={listFilter === 'favourites'}
+                className={listFilter === 'favourites' ? 'active' : ''}
+                onClick={() => {
+                  setListFilter('favourites');
+                  notify('Favourites are coming soon.');
+                }}
+              >
+                Favourites
+              </button>
               <button
                 type="button"
                 role="tab"
@@ -655,7 +767,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
           </div>
 
           <div className="msg-conversation-list">
-            {loading ? <Loading /> : error ? <Failure error={error} retry={() => void load()} /> : visibleConversations.map((c) => (
+            {loading ? <Loading label="Loading conversations…" /> : error ? <Failure error={error} retry={() => void load()} /> : visibleConversations.map((c) => (
               <button
                 key={c.id}
                 type="button"
@@ -666,7 +778,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                 className={`conversation-row msg-row ${selected === c.id ? 'selected' : ''}`}
               >
                 <span className="msg-avatar-wrap">
-                  <Avatar user={c.otherUser} size={48} />
+                  <Avatar user={c.otherUser} size={46} />
                   <span
                     className={`msg-presence ${c.otherUser.isOnline ? 'online' : 'offline'}`}
                     title={c.otherUser.isOnline ? 'Online' : 'Offline'}
@@ -676,11 +788,11 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                 <span className="conversation-preview msg-row-copy">
                   <span className="msg-row-top">
                     <strong>{c.otherUser.displayName}</strong>
-                    <time>{formatListTime(c.lastMessage?.sentAt)}</time>
+                    <time dateTime={c.lastMessage?.sentAt}>{formatListTime(c.lastMessage?.sentAt)}</time>
                   </span>
                   <small>{previewText(c, session?.userId)}</small>
                 </span>
-                {c.unreadCount > 0 && <span className="unread-bubble">{c.unreadCount}</span>}
+                {c.unreadCount > 0 && <span className="unread-bubble" aria-label={`${c.unreadCount} unread`}>{c.unreadCount > 99 ? '99+' : c.unreadCount}</span>}
               </button>
             ))}
             {!loading && !error && visibleConversations.length === 0 && (
@@ -690,33 +802,38 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                     ? 'No unread chats'
                     : listFilter === 'online'
                       ? 'No one is online'
-                      : 'No conversations'
+                      : listFilter === 'favourites'
+                        ? 'No favourites yet'
+                        : 'No conversations'
                 }
                 detail={
                   listFilter === 'unread'
                     ? 'You are all caught up.'
                     : listFilter === 'online'
                       ? 'Matches currently online will show up here.'
-                      : 'When you match with someone, say hello!'
+                      : listFilter === 'favourites'
+                        ? 'Favourites are coming soon.'
+                        : 'When you match with someone, say hello!'
                 }
               />
             )}
           </div>
-        </div>
+        </aside>
 
-        <div className={`chat-window msg-pane ${!selected ? 'hidden-mobile' : ''}`}>
+        <section className={`chat-window msg-pane ${!selected ? 'hidden-mobile' : ''}`} aria-label="Conversation">
           {!convo ? (
             <Empty
-              title="Your conversations, closer than ever"
-              detail="Select a conversation to start chatting, or head to Discover to find someone new."
+              title="Select a conversation"
+              detail="Choose someone from the list, or head to Matches to start a new chat."
               icon={<MessageSquare size={28} />}
             />
           ) : (
             <>
               <div className="chat-window-header msg-pane-header">
                 <button
+                  type="button"
                   aria-label="Back to conversations"
-                  className="mobile-back icon-button"
+                  className="mobile-back icon-button msg-back"
                   onClick={() => {
                     setSelected(null);
                     go('/messages');
@@ -725,7 +842,7 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                   <ArrowLeft />
                 </button>
                 <span className="msg-avatar-wrap">
-                  <Avatar user={convo.otherUser} size={46} />
+                  <Avatar user={convo.otherUser} size={44} />
                   <span
                     className={`msg-presence ${peerOnline ? 'online' : 'offline'}`}
                     title={peerOnline ? 'Online' : 'Offline'}
@@ -764,100 +881,128 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                 </div>
               )}
 
-              <div className="message-thread msg-thread" ref={threadRef} onScroll={onThreadScroll}>
-                {msgLoading ? (
-                  <Loading label="Loading messages..." />
-                ) : messages.length === 0 ? (
-                  <div className="chat-empty">
-                    <Heart fill="currentColor" size={29} />
-                    <h3>Say hi to {convo.otherUser.displayName}!</h3>
-                    <p>Break the ice with a friendly greeting.</p>
-                  </div>
-                ) : (
-                  messages.map((msg) => {
-                    const mine = msg.senderId === session?.userId;
-                    const unsent = msg.status === 'UNSENT';
-                    const menuOpen = messageMenu === msg.id;
-                    const call = msg.call;
-                    const CallIcon = call?.type === 'VIDEO' ? Video : Phone;
-                    const callMissed = call && call.status !== 'ENDED' && call.status !== 'BUSY';
-                    return (
-                      <div key={msg.id} className={`bubble-group msg-bubble-row ${mine ? 'mine' : 'theirs'}${call ? ' msg-call-row' : ''}`}>
-                        {!mine && (
-                          <span className="msg-bubble-avatar">
-                            <Avatar user={convo.otherUser} size={28} />
-                          </span>
-                        )}
-                        <div className="msg-bubble-stack">
-                          <div className={`message-bubble ${unsent ? 'msg-unsent' : ''}${call && !unsent ? ' msg-call' : ''}${callMissed ? ' msg-call-missed' : ''}`}>
-                            {unsent ? (
-                              <em>This message was deleted</em>
-                            ) : call ? (
-                              <div className="msg-call-body">
-                                <span className="msg-call-icon" aria-hidden="true"><CallIcon size={16} /></span>
-                                <span>{callLogLabel(call, mine)}</span>
-                              </div>
-                            ) : (
-                              <>
-                                {msg.attachment && (
-                                  <img className="message-image" src={mediaUrl(msg.attachment.url)} alt="Shared attachment" />
-                                )}
-                                {msg.text && <div>{msg.text}</div>}
-                              </>
-                            )}
-                          </div>
-                          <small>
-                            {new Date(msg.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            {mine && !unsent && <CheckCheck size={12} />}
-                            {!unsent && (
-                              <button
-                                type="button"
-                                className="msg-bubble-menu-btn"
-                                aria-label="Message actions"
-                                aria-expanded={menuOpen}
-                                onClick={() => setMessageMenu(menuOpen ? null : msg.id)}
-                              >
-                                <MoreVertical size={12} />
-                              </button>
-                            )}
-                          </small>
-                          {menuOpen && !unsent && (
-                            <div className="msg-bubble-menu" role="menu">
-                              <button type="button" role="menuitem" onClick={() => void deleteMessageForMe(msg.id)}>
-                                Delete for me
-                              </button>
-                              {mine && (
-                                <button type="button" role="menuitem" onClick={() => void unsendMessageAction(msg.id)}>
-                                  Delete for everyone
-                                </button>
-                              )}
-                              {!mine && !call && (
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  onClick={() => {
-                                    setReport({ type: 'message', id: msg.id });
-                                    setMessageMenu(null);
-                                  }}
-                                >
-                                  Report
-                                </button>
-                              )}
+              <div className="msg-thread-wrap">
+                <div className="message-thread msg-thread" ref={threadRef} onScroll={onThreadScroll}>
+                  {msgLoading ? (
+                    <Loading label="Loading messages..." />
+                  ) : messages.length === 0 ? (
+                    <div className="chat-empty">
+                      <Heart fill="currentColor" size={29} />
+                      <h3>Say hi to {convo.otherUser.displayName}!</h3>
+                      <p>Break the ice with a friendly greeting.</p>
+                    </div>
+                  ) : (
+                    messages.map((msg, index) => {
+                      const mine = msg.senderId === session?.userId;
+                      const unsent = msg.status === 'UNSENT';
+                      const menuOpen = messageMenu === msg.id;
+                      const call = msg.call;
+                      const CallIcon = call?.type === 'VIDEO' ? Video : Phone;
+                      const callMissed = call && call.status !== 'ENDED' && call.status !== 'BUSY';
+                      const prev = messages[index - 1];
+                      const next = messages[index + 1];
+                      const showDay = !prev || !sameDay(prev.sentAt, msg.sentAt);
+                      const grouped = isGroupedWith(prev, msg);
+                      const groupEnd = !next || !isGroupedWith(msg, next);
+                      const showAvatar = !mine && groupEnd;
+                      return (
+                        <div key={msg.id} className="msg-item">
+                          {showDay && (
+                            <div className="msg-day-sep" role="separator">
+                              <span>{formatDayLabel(msg.sentAt)}</span>
                             </div>
                           )}
+                          <div className={`bubble-group msg-bubble-row ${mine ? 'mine' : 'theirs'}${call ? ' msg-call-row' : ''}${grouped ? ' grouped' : ' group-start'}${groupEnd ? ' group-end' : ''}`}>
+                            {!mine && (
+                              <span className={`msg-bubble-avatar ${showAvatar ? '' : 'invisible'}`} aria-hidden={!showAvatar}>
+                                {showAvatar ? <Avatar user={convo.otherUser} size={28} /> : null}
+                              </span>
+                            )}
+                            <div className="msg-bubble-stack">
+                              <div className={`message-bubble ${unsent ? 'msg-unsent' : ''}${call && !unsent ? ' msg-call' : ''}${callMissed ? ' msg-call-missed' : ''}`}>
+                                {unsent ? (
+                                  <em>This message was deleted</em>
+                                ) : call ? (
+                                  <div className="msg-call-body">
+                                    <span className="msg-call-icon" aria-hidden="true"><CallIcon size={16} /></span>
+                                    <span>{callLogLabel(call, mine)}</span>
+                                  </div>
+                                ) : (
+                                  <>
+                                    {msg.attachment && (
+                                      <img className="message-image" src={mediaUrl(msg.attachment.url)} alt="Shared attachment" />
+                                    )}
+                                    {msg.text && <div className="msg-bubble-text">{msg.text}</div>}
+                                  </>
+                                )}
+                              </div>
+                              {groupEnd && (
+                                <small>
+                                  <time dateTime={msg.sentAt}>{new Date(msg.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+                                  {mine && !unsent && deliveryIcon(msg.status)}
+                                  {!unsent && (
+                                    <button
+                                      type="button"
+                                      className="msg-bubble-menu-btn"
+                                      aria-label="Message actions"
+                                      aria-expanded={menuOpen}
+                                      onClick={() => setMessageMenu(menuOpen ? null : msg.id)}
+                                    >
+                                      <MoreVertical size={12} />
+                                    </button>
+                                  )}
+                                </small>
+                              )}
+                              {menuOpen && !unsent && (
+                                <div className="msg-bubble-menu" role="menu">
+                                  <button type="button" role="menuitem" onClick={() => void deleteMessageForMe(msg.id)}>
+                                    Delete for me
+                                  </button>
+                                  {mine && (
+                                    <button type="button" role="menuitem" onClick={() => void unsendMessageAction(msg.id)}>
+                                      Delete for everyone
+                                    </button>
+                                  )}
+                                  {!mine && !call && (
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => {
+                                        setReport({ type: 'message', id: msg.id });
+                                        setMessageMenu(null);
+                                      }}
+                                    >
+                                      Report
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
+                      );
+                    })
+                  )}
+                  {typing && (
+                    <div className="msg-bubble-row theirs typing-row group-end" aria-live="polite">
+                      <span className="msg-bubble-avatar"><Avatar user={convo.otherUser} size={28} /></span>
+                      <div className="message-bubble msg-typing-bubble">
+                        <span className="dc-typing-dots" aria-hidden="true"><i /><i /><i /></span>
+                        <span className="sr-only">{convo.otherUser.displayName} is typing</span>
                       </div>
-                    );
-                  })
-                )}
-                {typing && (
-                  <div className="msg-bubble-row theirs typing-row" aria-live="polite">
-                    <span className="msg-bubble-avatar"><Avatar user={convo.otherUser} size={28} /></span>
-                    <div className="message-bubble msg-typing-bubble">
-                      <span className="dc-typing-dots" aria-hidden="true"><i /><i /><i /></span>
-                      <span className="sr-only">{convo.otherUser.displayName} is typing</span>
                     </div>
-                  </div>
+                  )}
+                </div>
+
+                {!atBottom && newBelow > 0 && (
+                  <button
+                    type="button"
+                    className="msg-jump-new"
+                    onClick={() => scrollThreadToBottom('smooth')}
+                  >
+                    <ChevronDown size={14} />
+                    {newBelow === 1 ? 'New message' : `${newBelow} new messages`}
+                  </button>
                 )}
               </div>
 
@@ -868,17 +1013,55 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                   void submit();
                 }}
               >
-                <button
-                  type="button"
-                  className="msg-icon-btn"
-                  aria-label="More actions"
-                  onClick={() => notify('More chat actions are coming soon.')}
-                >
-                  <Plus size={18} />
-                </button>
-                <label className="msg-icon-btn upload-chat" title="Attach an image">
-                  <ImagePlus size={18} />
+                <div className="msg-attach-wrap">
+                  <button
+                    type="button"
+                    className="msg-icon-btn"
+                    aria-label="Attachment menu"
+                    aria-expanded={attachOpen}
+                    onClick={() => {
+                      setAttachOpen((open) => !open);
+                      setEmojiOpen(false);
+                    }}
+                  >
+                    <Plus size={18} />
+                  </button>
+                  {attachOpen && (
+                    <div className="msg-attach-menu" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAttachOpen(false);
+                          fileInputRef.current?.click();
+                        }}
+                      >
+                        <ImagePlus size={16} /> Photo
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAttachOpen(false);
+                          notify('Gifts are coming soon.');
+                        }}
+                      >
+                        <Gift size={16} /> Gift
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAttachOpen(false);
+                          notify('More attachments are coming soon.');
+                        }}
+                      >
+                        <Paperclip size={16} /> File
+                      </button>
+                    </div>
+                  )}
                   <input
+                    ref={fileInputRef}
                     type="file"
                     hidden
                     accept="image/jpeg,image/png,image/webp"
@@ -888,22 +1071,17 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                       e.target.value = '';
                     }}
                   />
-                </label>
-                <button
-                  type="button"
-                  className="msg-icon-btn"
-                  aria-label="Send a gift"
-                  onClick={() => notify('Gifts are coming soon.')}
-                >
-                  <Gift size={18} />
-                </button>
+                </div>
                 <div className="msg-composer-field">
-                  <input
+                  <textarea
                     ref={inputRef}
                     aria-label="Write a message"
                     value={text}
                     maxLength={1000}
+                    rows={1}
                     placeholder="Type a message..."
+                    onCompositionStart={() => { composingRef.current = true; }}
+                    onCompositionEnd={() => { composingRef.current = false; }}
                     onBlur={() => {
                       if (selected) socketRef.current?.emit('typing', { conversationId: selected, isTyping: false });
                     }}
@@ -914,13 +1092,22 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                         typingAt.current = Date.now();
                       }
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' || e.shiftKey) return;
+                      if (e.nativeEvent.isComposing || composingRef.current || e.keyCode === 229) return;
+                      e.preventDefault();
+                      if (canSend) void submit();
+                    }}
                   />
                   <button
                     type="button"
                     className="msg-emoji-btn"
                     aria-label="Insert emoji"
                     aria-expanded={emojiOpen}
-                    onClick={() => setEmojiOpen((open) => !open)}
+                    onClick={() => {
+                      setEmojiOpen((open) => !open);
+                      setAttachOpen(false);
+                    }}
                   >
                     <Smile size={18} />
                   </button>
@@ -936,14 +1123,14 @@ export function Chat({ requestedConversation, go }: { requestedConversation?: st
                   type="submit"
                   className="msg-send"
                   aria-label="Send message"
-                  disabled={sending || !text.trim()}
+                  disabled={!canSend}
                 >
                   <Send size={18} />
                 </button>
               </form>
             </>
           )}
-        </div>
+        </section>
       </div>
 
       {report && (
