@@ -439,6 +439,46 @@ body.dc-msg-route .dc-header-messages .dc-logo-mark{width:34px;height:36px}
 .dc-messages .msg-call-body{
   display:flex;align-items:center;gap:10px;font-weight:550;letter-spacing:.01em;
 }
+.dc-messages .message-bubble.msg-gift{
+  min-width:140px;padding:14px 16px;text-align:center;
+}
+.dc-messages .msg-gift-body{display:flex;flex-direction:column;align-items:center;gap:4px}
+.dc-messages .msg-gift-emoji{font-size:36px;line-height:1}
+.dc-messages .msg-gift-body strong{font-size:13px}
+.dc-messages .msg-gift-body small{opacity:.75;font-size:11px}
+.dc-messages .message-bubble.msg-paid-emoji{
+  min-width:72px;padding:10px 14px;background:transparent;box-shadow:none;
+}
+.dc-messages .msg-bubble-row.mine .message-bubble.msg-paid-emoji{background:transparent}
+.dc-messages .msg-paid-emoji-body{font-size:42px;line-height:1;text-align:center}
+.gift-picker .section-tabs{margin:12px 0 16px}
+.gift-picker-grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;
+}
+.gift-picker-item{
+  border:1px solid #f0e0e7;border-radius:12px;background:#fff;padding:14px 10px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;
+}
+.gift-picker-item:disabled{opacity:.45;cursor:not-allowed}
+.gift-picker-item span{font-size:28px}
+.gift-picker-item strong{font-size:12px}
+.gift-picker-item small{font-size:10px;color:#8a7b85}
+.gift-picker-pack{border-top:1px solid #f0e0e7;padding:12px 0;display:grid;gap:10px}
+.gift-picker-emojis{display:flex;flex-wrap:wrap;gap:8px}
+.gift-picker-emojis button{
+  border:1px solid #f0e0e7;background:#fff;border-radius:10px;font-size:24px;width:48px;height:48px;cursor:pointer;
+}
+.store-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+.store-card{
+  border:1px solid var(--line,#ececf5);border-radius:14px;padding:16px;display:grid;gap:12px;background:#fff;
+}
+.store-card-art{
+  height:72px;display:grid;place-items:center;font-size:40px;background:#faf5f8;border-radius:12px;overflow:hidden;
+}
+.store-card-art img{width:100%;height:100%;object-fit:cover}
+.store-emojis{font-size:18px;letter-spacing:2px;margin:6px 0}
+.store-card-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.store-card-actions{display:flex;flex-wrap:wrap;gap:8px}
 .dc-messages .msg-call-icon{
   width:30px;height:30px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex:none;
   background:rgba(255,255,255,.18);

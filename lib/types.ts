@@ -21,10 +21,44 @@ export type ChatCallLog = {
   status: 'REJECTED' | 'CANCELLED' | 'MISSED' | 'BUSY' | 'ENDED';
   durationSeconds?: number | null;
 };
+export type ChatGift = {
+  itemId: string;
+  title: string;
+  emoji?: string;
+  imageUrl?: string;
+  priceCoins?: number;
+};
+export type ChatPaidEmoji = {
+  packId: string;
+  packTitle: string;
+  emoji: string;
+};
 export type ChatMessage = {
   id: string; conversationId: string; senderId: string; text?: string;
-  attachment?: Photo; call?: ChatCallLog | null; status?: string; sentAt: string; unsentAt?: string;
+  attachment?: Photo; call?: ChatCallLog | null;
+  gift?: ChatGift | null; paidEmoji?: ChatPaidEmoji | null;
+  status?: string; sentAt: string; unsentAt?: string;
   clientMessageId?: string | null;
+};
+export type StoreItem = {
+  id: string;
+  kind: 'COIN_PACK' | 'EMOJI_PACK' | 'GIFT';
+  title: string;
+  description?: string;
+  emoji?: string;
+  imageUrl?: string;
+  emojis?: string[];
+  priceCoins?: number;
+  priceMoneyMinor?: number;
+  currency?: string;
+  coinAmount?: number;
+  isActive?: boolean;
+  priceLabel?: string;
+};
+export type StoreWallet = {
+  coinBalance: number;
+  ownedPackIds: string[];
+  giftInventory: { itemId: string; quantity: number }[];
 };
 export type Conversation = {
   id: string; matchId: string; otherUser: Member;

@@ -4,8 +4,9 @@ import {useRouter,usePathname,useSearchParams} from 'next/navigation';
 import {useApp} from './provider';
 import {Button,Loading} from './ui';
 import {Discover} from './discover';import {Matches} from './matches';import {Chat} from './chat';import {Profile} from './profile';import {Onboarding} from './onboarding';import {Account,Help,LoginActivity,Notifications,Premium} from './extras';
+import {Store} from './store';
 import {MemberDetail} from './member-detail';
-type Section='discover'|'matches'|'messages'|'profile'|'notifications'|'premium'|'help'|'account'|'security'|'member';
+type Section='discover'|'matches'|'messages'|'profile'|'notifications'|'premium'|'store'|'help'|'account'|'security'|'member';
 function View({section,memberId}:{section:Section;memberId?:string}){
   const {session,ready,me,meStatus,reloadMe,signOut}=useApp();
   const router=useRouter();
@@ -23,7 +24,7 @@ function View({section,memberId}:{section:Section;memberId?:string}){
   if(!me)return <div className="dc-wait"><Loading label="Loading your profile…"/></div>;
   if(!me.onboardingComplete)return <Onboarding/>;
   return <main id="main-content" className={`dc-member dc-${section}${section==='messages'?' dc-member-messages':''}`}>
-    {section==='discover'?<Discover go={go}/>:section==='matches'?<Matches go={go}/>:section==='messages'?<Chat go={go}/>:section==='profile'?<Profile go={go}/>:section==='notifications'?<Notifications/>:section==='premium'?<Premium/>:section==='help'?<Help/>:section==='account'?<Account/>:section==='security'?<LoginActivity/>:section==='member'&&memberId?<MemberDetail id={memberId} go={go}/>:null}
+    {section==='discover'?<Discover go={go}/>:section==='matches'?<Matches go={go}/>:section==='messages'?<Chat go={go}/>:section==='profile'?<Profile go={go}/>:section==='notifications'?<Notifications/>:section==='premium'?<Premium/>:section==='store'?<Store/>:section==='help'?<Help/>:section==='account'?<Account/>:section==='security'?<LoginActivity/>:section==='member'&&memberId?<MemberDetail id={memberId} go={go}/>:null}
   </main>;
 }
 export function MemberRoute(props:{section:Section;conversationId?:string;memberId?:string}){

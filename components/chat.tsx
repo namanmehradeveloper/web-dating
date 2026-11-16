@@ -7,10 +7,11 @@ import {
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { request, upload, uid, mediaUrl, messageOf } from '@/lib/api';
-import type { Conversation, ChatMessage, ChatCallLog } from '@/lib/types';
+import type { Conversation, ChatMessage, ChatCallLog, StoreItem, StoreWallet } from '@/lib/types';
 import { CallOverlay, type ActiveCall, type AgoraCredentials, type CallInfo } from './call-overlay';
 import { Avatar, Button, Empty, Failure, Loading, Modal } from './ui';
 import { useApp } from './provider';
+import Link from 'next/link';
 
 const reasons = ['FAKE_PROFILE', 'INAPPROPRIATE_PHOTOS', 'HARASSMENT', 'SPAM_OR_SCAM', 'UNDERAGE', 'OFFLINE_BEHAVIOUR', 'OTHER'];
 const QUICK_EMOJI = ['😊', '❤️', '😂', '🔥', '👍', '🥰'];
@@ -124,6 +125,12 @@ function previewText(conversation: Conversation, viewerId?: string) {
     const viewerIsCaller = Boolean(viewerId && conversation.lastMessage.senderId === viewerId);
     return callLogLabel(conversation.lastMessage.call, viewerIsCaller);
   }
+  if (conversation.lastMessage?.gift) {
+    return `🎁 ${conversation.lastMessage.gift.title || 'Gift'}`;
+  }
+  if (conversation.lastMessage?.paidEmoji) {
+    return conversation.lastMessage.paidEmoji.emoji;
+  }
   if (conversation.lastMessage?.text) return conversation.lastMessage.text;
   if (conversation.lastMessage?.attachment) return '📷 Photo';
   return 'Start the conversation!';
@@ -164,7 +171,7 @@ function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
   if (!prev) return false;
   if (prev.senderId !== current.senderId) return false;
   if (prev.status === 'UNSENT' || current.status === 'UNSENT') return false;
-  if (prev.call || current.call) return false;
+  if (prev.call || current.call || prev.gift || current.gift || prev.paidEmoji || current.paidEmoji) return false;
   return Math.abs(Date.parse(current.sentAt) - Date.parse(prev.sentAt)) <= GROUP_GAP_MS;
 }
 
@@ -182,6 +189,11 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [giftOpen, setGiftOpen] = useState(false);
+  const [giftTab, setGiftTab] = useState<'gifts' | 'emojis'>('gifts');
+  const [storeCatalog, setStoreCatalog] = useState<{ gifts: StoreItem[]; emojiPacks: StoreItem[] } | null>(null);
+  const [storeWallet, setStoreWallet] = useState<StoreWallet | null>(null);
+  const [storeLoading, setStoreLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [msgLoading, setMsgLoading] = useState(false);
   const [error, setError] = useState('');
@@ -544,21 +556,34 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const peerOnline = Boolean(convo?.otherUser.isOnline);
   const canSend = Boolean(text.trim()) && !sending && Boolean(selected);
 
-  const submit = async (attachment?: File) => {
-    if (sending || (!text.trim() && !attachment) || !selected) return;
+  const openGiftPicker = async () => {
+    setAttachOpen(false);
+    setEmojiOpen(false);
+    setGiftOpen(true);
+    setStoreLoading(true);
+    try {
+      const [cat, wal] = await Promise.all([
+        request<{ gifts: StoreItem[]; emojiPacks: StoreItem[] }>('GET', '/store/catalog'),
+        request<StoreWallet>('GET', '/store/wallet'),
+      ]);
+      setStoreCatalog({ gifts: cat.gifts || [], emojiPacks: cat.emojiPacks || [] });
+      setStoreWallet(wal);
+    } catch (e) {
+      notify(messageOf(e));
+      setGiftOpen(false);
+    } finally {
+      setStoreLoading(false);
+    }
+  };
+
+  const postChatMessage = async (body: Record<string, unknown>, clientMessageId: string) => {
+    if (!selected) return;
+    const conversationId = selected;
     setSending(true);
     try {
-      const conversationId = selected;
-      const id = uid();
-      const body: Record<string, string> = { clientMessageId: id };
-      if (text.trim()) body.text = text.trim();
-      if (attachment) {
-        const media = await upload(attachment, 'CHAT_ATTACHMENT');
-        body.attachmentMediaId = media.mediaId;
-      }
       const data = await request<ChatMessage>('POST', `/conversations/${encodeURIComponent(conversationId)}/messages`, {
-        body,
-        idempotencyKey: id,
+        body: { ...body, clientMessageId },
+        idempotencyKey: clientMessageId,
       });
       if (selectedRef.current === conversationId) {
         stickToBottom.current = true;
@@ -568,6 +593,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
       writeDraft(conversationId, '');
       setEmojiOpen(false);
       setAttachOpen(false);
+      setGiftOpen(false);
       socketRef.current?.emit('typing', { conversationId, isTyping: false });
       void load(false);
       requestAnimationFrame(() => scrollThreadToBottom('smooth'));
@@ -576,6 +602,36 @@ export function Chat({ go }: { go: (p: string) => void }) {
     } finally {
       setSending(false);
     }
+  };
+
+  const submit = async (attachment?: File) => {
+    if (sending || (!text.trim() && !attachment) || !selected) return;
+    const id = uid();
+    const body: Record<string, string> = {};
+    if (text.trim()) body.text = text.trim();
+    if (attachment) {
+      try {
+        setSending(true);
+        const media = await upload(attachment, 'CHAT_ATTACHMENT');
+        body.attachmentMediaId = media.mediaId;
+        setSending(false);
+      } catch (e) {
+        setSending(false);
+        notify(messageOf(e));
+        return;
+      }
+    }
+    await postChatMessage(body, id);
+  };
+
+  const sendGift = async (itemId: string) => {
+    if (sending || !selected) return;
+    await postChatMessage({ giftItemId: itemId }, uid());
+  };
+
+  const sendPaidEmoji = async (packId: string, emoji: string) => {
+    if (sending || !selected) return;
+    await postChatMessage({ paidEmoji: { packId, emoji } }, uid());
   };
 
   const reportAction = async () => {
@@ -949,20 +1005,30 @@ export function Chat({ go }: { go: (p: string) => void }) {
                               <span>{formatDayLabel(msg.sentAt)}</span>
                             </div>
                           )}
-                          <div className={`bubble-group msg-bubble-row ${mine ? 'mine' : 'theirs'}${call ? ' msg-call-row' : ''}${grouped ? ' grouped' : ' group-start'}${groupEnd ? ' group-end' : ''}`}>
+                          <div className={`bubble-group msg-bubble-row ${mine ? 'mine' : 'theirs'}${call ? ' msg-call-row' : ''}${msg.gift || msg.paidEmoji ? ' msg-gift-row' : ''}${grouped ? ' grouped' : ' group-start'}${groupEnd ? ' group-end' : ''}`}>
                             {!mine && (
                               <span className={`msg-bubble-avatar ${showAvatar ? '' : 'invisible'}`} aria-hidden={!showAvatar}>
                                 {showAvatar ? <Avatar user={convo.otherUser} size={28} /> : null}
                               </span>
                             )}
                             <div className="msg-bubble-stack">
-                              <div className={`message-bubble ${unsent ? 'msg-unsent' : ''}${call && !unsent ? ' msg-call' : ''}${callMissed ? ' msg-call-missed' : ''}`}>
+                              <div className={`message-bubble ${unsent ? 'msg-unsent' : ''}${call && !unsent ? ' msg-call' : ''}${callMissed ? ' msg-call-missed' : ''}${msg.gift && !unsent ? ' msg-gift' : ''}${msg.paidEmoji && !unsent ? ' msg-paid-emoji' : ''}`}>
                                 {unsent ? (
                                   <em>This message was deleted</em>
                                 ) : call ? (
                                   <div className="msg-call-body">
                                     <span className="msg-call-icon" aria-hidden="true"><CallIcon size={16} /></span>
                                     <span>{callLogLabel(call, mine)}</span>
+                                  </div>
+                                ) : msg.gift ? (
+                                  <div className="msg-gift-body">
+                                    <span className="msg-gift-emoji" aria-hidden="true">{msg.gift.emoji || '🎁'}</span>
+                                    <strong>{msg.gift.title}</strong>
+                                    <small>Virtual gift</small>
+                                  </div>
+                                ) : msg.paidEmoji ? (
+                                  <div className="msg-paid-emoji-body" aria-label={msg.paidEmoji.packTitle}>
+                                    <span>{msg.paidEmoji.emoji}</span>
                                   </div>
                                 ) : (
                                   <>
@@ -1079,8 +1145,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
                         type="button"
                         role="menuitem"
                         onClick={() => {
-                          setAttachOpen(false);
-                          notify('Gifts are coming soon.');
+                          void openGiftPicker();
                         }}
                       >
                         <Gift size={16} /> Gift
@@ -1170,6 +1235,80 @@ export function Chat({ go }: { go: (p: string) => void }) {
         </section>
       </div>
 
+      {giftOpen && (
+        <Modal title="Send a gift" onClose={() => setGiftOpen(false)}>
+          <div className="gift-picker">
+            <p className="muted">
+              Balance: <strong>{storeWallet?.coinBalance?.toLocaleString() ?? '—'} coins</strong>
+              {' · '}
+              <Link href="/store">Open store</Link>
+            </p>
+            <div className="section-tabs" role="tablist">
+              <button type="button" className={giftTab === 'gifts' ? 'current' : ''} onClick={() => setGiftTab('gifts')}>
+                Gifts
+              </button>
+              <button type="button" className={giftTab === 'emojis' ? 'current' : ''} onClick={() => setGiftTab('emojis')}>
+                Paid emojis
+              </button>
+            </div>
+            {storeLoading ? (
+              <Loading />
+            ) : giftTab === 'gifts' ? (
+              <div className="gift-picker-grid">
+                {(storeCatalog?.gifts || []).map((item) => {
+                  const qty = storeWallet?.giftInventory?.find((g) => g.itemId === item.id)?.quantity ?? 0;
+                  const canAfford = qty > 0 || (storeWallet?.coinBalance ?? 0) >= (item.priceCoins || 0);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="gift-picker-item"
+                      disabled={sending || !canAfford}
+                      onClick={() => void sendGift(item.id)}
+                    >
+                      <span aria-hidden="true">{item.emoji || '🎁'}</span>
+                      <strong>{item.title}</strong>
+                      <small>{qty > 0 ? `Inventory ×${qty}` : `${item.priceCoins || 0} coins`}</small>
+                    </button>
+                  );
+                })}
+                {!storeCatalog?.gifts?.length && <Empty title="No gifts" detail="Add gifts from the store." />}
+              </div>
+            ) : (
+              <div className="gift-picker-packs">
+                {(storeCatalog?.emojiPacks || []).map((pack) => {
+                  const owned = storeWallet?.ownedPackIds?.includes(pack.id);
+                  return (
+                    <div key={pack.id} className="gift-picker-pack">
+                      <div>
+                        <strong>{pack.emoji || '✨'} {pack.title}</strong>
+                        {!owned && <small className="muted"> Buy in Store · {pack.priceCoins || 0} coins</small>}
+                      </div>
+                      {owned ? (
+                        <div className="gift-picker-emojis">
+                          {(pack.emojis || []).map((emoji) => (
+                            <button
+                              key={`${pack.id}-${emoji}`}
+                              type="button"
+                              disabled={sending}
+                              onClick={() => void sendPaidEmoji(pack.id, emoji)}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <Link className="button outline" href="/store">Buy pack</Link>
+                      )}
+                    </div>
+                  );
+                })}
+                {!storeCatalog?.emojiPacks?.length && <Empty title="No packs" detail="Emoji packs appear in the store." />}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
       {report && (
         <Modal title="Report an issue" onClose={() => setReport(null)}>
           <div className="stack">
