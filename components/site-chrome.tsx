@@ -187,8 +187,7 @@ export function SiteHeader() {
         <div className="dc-header-actions">
           {session ? (
             <>
-              {/* Plus Membership Pill */}
-              <Link href="/premium" className="dc-header-plus-btn" title="Explore Plus Membership">
+              <Link href="/premium" className="dc-plus" title="Explore Plus Membership">
                 <Crown size={14} />
                 <span>Plus</span>
               </Link>
@@ -252,10 +251,10 @@ export function SiteHeader() {
             </>
           ) : (
             <>
-              <Link className="dc-login-btn" href="/login">
+              <Link className="dc-login" href="/login">
                 Login
               </Link>
-              <Link className="dc-join-btn" href="/signup">
+              <Link className="dc-join" href="/signup">
                 <span>Join Free</span>
                 <ArrowRight size={15} />
               </Link>
