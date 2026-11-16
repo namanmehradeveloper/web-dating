@@ -1,12 +1,331 @@
 'use client';
+
 import Link from 'next/link';
-import {usePathname,useRouter} from 'next/navigation';
-import {useEffect,useState,useRef} from 'react';
-import {Heart,Menu,X,ArrowRight,ChevronDown,LogOut,ShieldCheck,Crown} from 'lucide-react';
-import {useApp} from './provider';
-import {Avatar} from './ui';
-const publicLinks=[['Home','/'],['About','/about'],['How It Works','/how-it-works'],['Success Stories','/success-stories'],['Safety','/safety']];
-const memberLinks=[['Home','/'],['Discover','/discover'],['Matches','/matches'],['Messages','/messages'],['Store','/store'],['My Profile','/profile']];
-export function Logo({inverse=false}:{inverse?:boolean}){return <Link className={`dc-logo ${inverse?'inverse':''}`} href="/" aria-label="Dating Cloud home"><span className="dc-logo-mark"><Heart fill="currentColor" size={20}/></span><span className="dc-logo-name">Dating<span>Cloud</span><small>CONNECTIONS THAT MATTER</small></span></Link>}
-export function SiteHeader(){const {session,me,signOut}=useApp();const pathname=usePathname();const router=useRouter();const [open,setOpen]=useState(false);const menuButton=useRef<HTMLButtonElement>(null);const [account,setAccount]=useState(false);const onMessages=pathname==='/messages'||pathname.startsWith('/messages/');useEffect(()=>{setOpen(false);setAccount(false)},[pathname]);useEffect(()=>{document.body.classList.toggle('dc-msg-route',onMessages);return()=>document.body.classList.remove('dc-msg-route')},[onMessages]);useEffect(()=>{if(!open)return;const previous=document.body.style.overflow;document.body.style.overflow='hidden';const close=(e:KeyboardEvent)=>{if(e.key==='Escape'){setOpen(false);menuButton.current?.focus()}};const media=matchMedia('(min-width:851px)');const resize=()=>{if(media.matches)setOpen(false)};document.addEventListener('keydown',close);media.addEventListener('change',resize);return()=>{document.body.style.overflow=previous;document.removeEventListener('keydown',close);media.removeEventListener('change',resize)}},[open]);return <header className={`dc-header${onMessages?' dc-header-messages':''}`}><div className="dc-header-inner"><Logo/><nav className={`dc-nav ${open?'open':''}`} id="main-navigation" aria-label="Main navigation">{(session?memberLinks:publicLinks).map(([label,url])=><Link key={url} href={url} className={pathname===url||(url==='/messages'&&pathname.startsWith('/messages/'))?'active':''} aria-current={pathname===url?'page':undefined}>{label}</Link>)}{session?<><Link className="dc-mobile-extra" href="/help">Help & support</Link><Link className="dc-mobile-extra" href="/account">Settings</Link><button className="dc-mobile-extra" onClick={()=>void signOut()}>Log out</button></>:<><Link className="dc-mobile-extra" href="/login">Login</Link><Link className="dc-mobile-extra dc-mobile-join" href="/signup">Join Free</Link></>}</nav><div className="dc-header-actions">{session?<><Link href="/store" className="dc-plus">Store</Link><Link href="/premium" className="dc-plus"><Crown size={15}/> Plus</Link><div className="dc-account"><button className="dc-account-trigger" onClick={()=>setAccount(v=>!v)} aria-haspopup="menu" aria-expanded={account}><Avatar user={me} size={34}/><span>{me?.displayName||'Account'}</span><ChevronDown size={14}/></button>{account&&<div className="dc-account-menu" role="menu"><Link href="/profile" role="menuitem">My profile</Link><Link href="/store" role="menuitem">Store</Link><Link href="/notifications" role="menuitem">Notifications</Link><Link href="/account" role="menuitem">Account settings</Link><Link href="/help" role="menuitem">Help & support</Link><button role="menuitem" onClick={()=>{void signOut();router.push('/')}}><LogOut size={15}/> Log out</button></div>}</div></>:<><Link className="dc-login" href="/login">Login</Link><Link className="dc-join" href="/signup">Join Free <ArrowRight size={16}/></Link></>}</div><button ref={menuButton} aria-controls="main-navigation" className="dc-menu-toggle" onClick={()=>setOpen(v=>!v)} aria-expanded={open} aria-label={open?'Close menu':'Open menu'}>{open?<X size={22}/>:<Menu size={22}/>}</button></div></header>}
-export function SiteFooter(){const pathname=usePathname();if(pathname==='/messages'||pathname.startsWith('/messages/'))return null;return <footer className="dc-footer"><div className="dc-footer-inner"><div className="dc-footer-main"><div className="dc-footer-brand"><Logo inverse/><p>Real people, genuine conversations, new possibilities. Meet at your own pace, in a place built for meaningful connection.</p><span><ShieldCheck size={15}/> For adults 18 and over</span></div><div className="dc-footer-links"><h3>Explore</h3><Link href="/">Home</Link><Link href="/about">About us</Link><Link href="/how-it-works">How it works</Link><Link href="/success-stories">Success stories</Link></div><div className="dc-footer-links"><h3>Members</h3><Link href="/discover">Discover</Link><Link href="/matches">Matches</Link><Link href="/messages">Messages</Link><Link href="/profile">My profile</Link></div><div className="dc-footer-links"><h3>Support & legal</h3><Link href="/safety">Safety center</Link><Link href="/faq">FAQs</Link><Link href="/contact">Contact us</Link><Link href="/privacy">Privacy policy</Link><Link href="/terms">Terms & conditions</Link></div></div><div className="dc-footer-end"><span>© {new Date().getFullYear()} Dating Cloud. All rights reserved.</span><span>Made for meaningful connections ♡</span></div></div></footer>}
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState, useRef } from 'react';
+import {
+  Heart, Menu, X, ArrowRight, ChevronDown, LogOut, ShieldCheck,
+  Crown, Bell, User, Settings, HelpCircle,
+} from 'lucide-react';
+import { useApp } from './provider';
+import { Avatar } from './ui';
+import { request } from '@/lib/api';
+
+const publicLinks = [
+  ['Home', '/'],
+  ['Discover', '/discover'],
+  ['About', '/about'],
+  ['How It Works', '/how-it-works'],
+  ['Stories', '/success-stories'],
+  ['Safety', '/safety'],
+];
+
+const memberLinks = [
+  ['Discover', '/discover'],
+  ['Matches', '/matches'],
+  ['Messages', '/messages'],
+  ['Store', '/store'],
+];
+
+export function Logo({ inverse = false }: { inverse?: boolean }) {
+  return (
+    <Link className={`dc-logo ${inverse ? 'inverse' : ''}`} href="/" aria-label="Dating Cloud home">
+      <span className="dc-logo-mark">
+        <Heart fill="currentColor" size={20} />
+      </span>
+      <span className="dc-logo-name">
+        Dating<span>Cloud</span>
+        <small>CONNECTIONS THAT MATTER</small>
+      </span>
+    </Link>
+  );
+}
+
+export function SiteHeader() {
+  const { session, me, signOut } = useApp();
+  const pathname = usePathname();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [account, setAccount] = useState(false);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const accountRef = useRef<HTMLDivElement>(null);
+
+  const onMessages = pathname === '/messages' || pathname.startsWith('/messages/');
+
+  // Close menus on route change
+  useEffect(() => {
+    setOpen(false);
+    setAccount(false);
+  }, [pathname]);
+
+  // Messages route viewport layout class
+  useEffect(() => {
+    document.body.classList.toggle('dc-msg-route', onMessages);
+    return () => document.body.classList.remove('dc-msg-route');
+  }, [onMessages]);
+
+  // Click outside to close account menu
+  useEffect(() => {
+    if (!account) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (accountRef.current && !accountRef.current.contains(e.target as Node)) {
+        setAccount(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [account]);
+
+  // Fetch unread notifications count when logged in
+  useEffect(() => {
+    if (!session) return;
+    let active = true;
+    request<{ items: { isRead?: boolean; readAt?: string | null }[] }>('GET', '/notifications?limit=25')
+      .then((res) => {
+        if (!active) return;
+        const count = (res.items || []).filter((n) => !n.isRead && !n.readAt).length;
+        setUnreadNotifs(count);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [session, pathname]);
+
+  // Mobile menu keyboard and resize listeners
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const close = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        menuButton.current?.focus();
+      }
+    };
+    const media = matchMedia('(min-width: 961px)');
+    const resize = () => {
+      if (media.matches) setOpen(false);
+    };
+
+    document.addEventListener('keydown', close);
+    media.addEventListener('change', resize);
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener('keydown', close);
+      media.removeEventListener('change', resize);
+    };
+  }, [open]);
+
+  const navLinks = session ? memberLinks : publicLinks;
+
+  return (
+    <header className={`dc-header${onMessages ? ' dc-header-messages' : ''}`}>
+      <div className="dc-header-inner">
+        {/* Brand Logo */}
+        <Logo />
+
+        {/* Desktop Navigation */}
+        <nav className={`dc-nav ${open ? 'open' : ''}`} id="main-navigation" aria-label="Main navigation">
+          {navLinks.map(([label, url]) => {
+            const isActive = pathname === url || (url === '/messages' && pathname.startsWith('/messages/'));
+            return (
+              <Link
+                key={url}
+                href={url}
+                className={isActive ? 'active' : ''}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => setOpen(false)}
+              >
+                {label}
+              </Link>
+            );
+          })}
+
+          {/* Mobile-only Extra Links */}
+          {session ? (
+            <>
+              <Link className="dc-mobile-extra" href="/profile" onClick={() => setOpen(false)}>
+                My profile
+              </Link>
+              <Link className="dc-mobile-extra" href="/notifications" onClick={() => setOpen(false)}>
+                Notifications{unreadNotifs > 0 ? ` (${unreadNotifs})` : ''}
+              </Link>
+              <Link className="dc-mobile-extra" href="/account" onClick={() => setOpen(false)}>
+                Account
+              </Link>
+              <Link className="dc-mobile-extra" href="/help" onClick={() => setOpen(false)}>
+                Help
+              </Link>
+              <button
+                type="button"
+                className="dc-mobile-extra"
+                onClick={() => {
+                  setOpen(false);
+                  void signOut();
+                  router.push('/');
+                }}
+              >
+                Log out
+              </button>
+            </>
+          ) : (
+            <>
+              <Link className="dc-mobile-extra" href="/login" onClick={() => setOpen(false)}>
+                Login
+              </Link>
+              <Link className="dc-mobile-extra dc-mobile-join" href="/signup" onClick={() => setOpen(false)}>
+                Join Free
+              </Link>
+            </>
+          )}
+        </nav>
+
+        {/* Right Header Actions */}
+        <div className="dc-header-actions">
+          {session ? (
+            <>
+              {/* Plus Membership Pill */}
+              <Link href="/premium" className="dc-header-plus-btn" title="Explore Plus Membership">
+                <Crown size={14} />
+                <span>Plus</span>
+              </Link>
+
+              {/* User Account Dropdown */}
+              <div className="dc-account" ref={accountRef}>
+                <button
+                  type="button"
+                  className="dc-account-trigger"
+                  onClick={() => setAccount((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={account}
+                  title="Account menu"
+                >
+                  <div className="dc-account-avatar-wrap">
+                    <Avatar user={me} size={32} />
+                    {unreadNotifs > 0 && <span className="dc-notif-dot-mini" />}
+                  </div>
+                  <span>{me?.displayName || 'Account'}</span>
+                  <ChevronDown size={14} />
+                </button>
+
+                {account && (
+                  <div className="dc-account-menu" role="menu">
+                    <Link href="/profile" role="menuitem" onClick={() => setAccount(false)}>
+                      <User size={15} />
+                      <span>Profile</span>
+                    </Link>
+                    <Link href="/notifications" role="menuitem" onClick={() => setAccount(false)}>
+                      <Bell size={15} />
+                      <span>Notifications</span>
+                      {unreadNotifs > 0 && <span className="dc-menu-badge">{unreadNotifs}</span>}
+                    </Link>
+                    <Link href="/account" role="menuitem" onClick={() => setAccount(false)}>
+                      <Settings size={15} />
+                      <span>Settings</span>
+                    </Link>
+                    <Link href="/help" role="menuitem" onClick={() => setAccount(false)}>
+                      <HelpCircle size={15} />
+                      <span>Help</span>
+                    </Link>
+
+                    <div className="dc-menu-divider" />
+
+                    <button
+                      type="button"
+                      className="dc-menu-logout"
+                      role="menuitem"
+                      onClick={() => {
+                        setAccount(false);
+                        void signOut();
+                        router.push('/');
+                      }}
+                    >
+                      <LogOut size={15} />
+                      <span>Log out</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <Link className="dc-login-btn" href="/login">
+                Login
+              </Link>
+              <Link className="dc-join-btn" href="/signup">
+                <span>Join Free</span>
+                <ArrowRight size={15} />
+              </Link>
+            </>
+          )}
+        </div>
+
+        {/* Mobile Navigation Toggle Button */}
+        <button
+          ref={menuButton}
+          type="button"
+          aria-controls="main-navigation"
+          className="dc-menu-toggle"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={open ? 'Close menu' : 'Open menu'}
+        >
+          {open ? <X size={20} /> : <Menu size={20} />}
+        </button>
+      </div>
+    </header>
+  );
+}
+
+export function SiteFooter() {
+  const pathname = usePathname();
+  if (pathname === '/messages' || pathname.startsWith('/messages/')) return null;
+
+  return (
+    <footer className="dc-footer">
+      <div className="dc-footer-inner">
+        <div className="dc-footer-main">
+          <div className="dc-footer-brand">
+            <Logo inverse />
+            <p>
+              Real people, genuine conversations, new possibilities. Meet at your own pace, in a place built for
+              meaningful connection.
+            </p>
+            <span>
+              <ShieldCheck size={15} /> For adults 18 and over
+            </span>
+          </div>
+          <div className="dc-footer-links">
+            <h3>Explore</h3>
+            <Link href="/">Home</Link>
+            <Link href="/about">About us</Link>
+            <Link href="/how-it-works">How it works</Link>
+            <Link href="/success-stories">Success stories</Link>
+          </div>
+          <div className="dc-footer-links">
+            <h3>Members</h3>
+            <Link href="/discover">Discover</Link>
+            <Link href="/matches">Matches</Link>
+            <Link href="/messages">Messages</Link>
+            <Link href="/profile">My profile</Link>
+          </div>
+          <div className="dc-footer-links">
+            <h3>Support & legal</h3>
+            <Link href="/safety">Safety center</Link>
+            <Link href="/faq">FAQs</Link>
+            <Link href="/contact">Contact us</Link>
+            <Link href="/privacy">Privacy policy</Link>
+            <Link href="/terms">Terms & conditions</Link>
+          </div>
+        </div>
+        <div className="dc-footer-end">
+          <span>© {new Date().getFullYear()} Dating Cloud. All rights reserved.</span>
+          <span>Made for meaningful connections ♡</span>
+        </div>
+      </div>
+    </footer>
+  );
+}
