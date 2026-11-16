@@ -4,6 +4,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Send, ImagePlus, MoreVertical, MessageSquare, Search, ShieldAlert, Ban, Flag,
   Check, CheckCheck, Heart, Phone, Video, Plus, Gift, Smile, Trash2, ChevronDown, Paperclip,
+  X, Copy, Sparkles, User,
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { request, upload, uid, mediaUrl, messageOf } from '@/lib/api';
@@ -15,6 +16,19 @@ import Link from 'next/link';
 
 const reasons = ['FAKE_PROFILE', 'INAPPROPRIATE_PHOTOS', 'HARASSMENT', 'SPAM_OR_SCAM', 'UNDERAGE', 'OFFLINE_BEHAVIOUR', 'OTHER'];
 const QUICK_EMOJI = ['😊', '❤️', '😂', '🔥', '👍', '🥰'];
+const EMOJI_CATEGORIES = [
+  { name: 'Love', icon: '❤️', list: ['❤️', '🔥', '🥰', '😍', '💕', '✨', '🌹', '💌', '💖', '😘', '💘', '💋'] },
+  { name: 'Smiles', icon: '😊', list: ['😊', '😂', '🤣', '😉', '😎', '🤩', '😋', '🥳', '😇', '🤗', '😏', '😜'] },
+  { name: 'Gestures', icon: '👍', list: ['👋', '👍', '🙌', '👏', '🤝', '✌️', '🙏', '💯', '🤞', '💪', '👌', '🎉'] },
+  { name: 'Vibe', icon: '☕', list: ['☕', '🍕', '🥂', '🍰', '🌸', '🚀', '💬', '🏖️', '🍿', '🍫', '🍦', '🍩'] },
+];
+const ICEBREAKER_PROMPTS = [
+  "👋 Hey there! Loved your profile, had to say hello!",
+  "☕ Quick debate: Chai or Coffee person?",
+  "✨ What's the highlight of your week so far?",
+  "🎵 What's one song you currently have on repeat?",
+  "🍕 Quick question: Best food or hangout spot in town?",
+];
 const DRAFT_PREFIX = 'dc-msg-draft:';
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
@@ -158,9 +172,9 @@ function peerStatusLabel(peer: Conversation['otherUser'] | undefined, typing: bo
 }
 
 function deliveryIcon(status?: string) {
-  if (status === 'READ' || status === 'SEEN') return <CheckCheck size={12} aria-label="Read" />;
-  if (status === 'DELIVERED') return <CheckCheck size={12} aria-label="Delivered" />;
-  return <Check size={12} aria-label="Sent" />;
+  if (status === 'READ' || status === 'SEEN') return <CheckCheck size={13} className="msg-check-status read" aria-label="Read" />;
+  if (status === 'DELIVERED') return <CheckCheck size={13} className="msg-check-status delivered" aria-label="Delivered" />;
+  return <Check size={13} className="msg-check-status sent" aria-label="Sent" />;
 }
 
 function sameDay(a: string, b: string) {
@@ -188,6 +202,8 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const [search, setSearch] = useState('');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [emojiTab, setEmojiTab] = useState(0);
+  const [pendingAttachment, setPendingAttachment] = useState<{ file: File; previewUrl: string } | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const [giftOpen, setGiftOpen] = useState(false);
   const [giftTab, setGiftTab] = useState<'gifts' | 'emojis'>('gifts');
@@ -220,6 +236,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const messageRequestSeq = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null);
   const composingRef = useRef(false);
   const prevMessageCount = useRef(0);
   const notifyRef = useRef(notify);
@@ -228,6 +245,42 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const updateActiveCallRef = useRef<(next: ActiveCall | null) => void>(() => {});
   const tokenRef = useRef(session?.accessToken);
   const everConnected = useRef(false);
+
+  const clearPendingAttachment = useCallback(() => {
+    setPendingAttachment((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  }, []);
+
+  const handleFileSelected = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) {
+      notify('Please select an image file (JPG, PNG, WebP).');
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      notify('Image must be under 15MB.');
+      return;
+    }
+    const previewUrl = URL.createObjectURL(file);
+    setPendingAttachment((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return { file, previewUrl };
+    });
+    setAttachOpen(false);
+    setTimeout(() => inputRef.current?.focus(), 60);
+  }, [notify]);
+
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setEmojiOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [emojiOpen]);
 
   const updateActiveCall = useCallback((next: ActiveCall | null) => {
     activeCallRef.current = next;
@@ -290,6 +343,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
     setTyping(false);
     setEmojiOpen(false);
     setAttachOpen(false);
+    clearPendingAttachment();
     if (typingTimer.current) clearTimeout(typingTimer.current);
     setOptions(false);
     setMessageMenu(null);
@@ -301,7 +355,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
     } else {
       setText(readDraft(selected));
     }
-  }, [selected]);
+  }, [selected, clearPendingAttachment]);
 
   useEffect(() => {
     setSelected(requestedConversation || null);
@@ -554,7 +608,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
 
   const convo = conversations.find((c) => c.id === selected);
   const peerOnline = Boolean(convo?.otherUser.isOnline);
-  const canSend = Boolean(text.trim()) && !sending && Boolean(selected);
+  const canSend = (Boolean(text.trim()) || Boolean(pendingAttachment)) && !sending && Boolean(selected);
 
   const openGiftPicker = async () => {
     setAttachOpen(false);
@@ -604,7 +658,8 @@ export function Chat({ go }: { go: (p: string) => void }) {
     }
   };
 
-  const submit = async (attachment?: File) => {
+  const submit = async (customAttachment?: File) => {
+    const attachment = customAttachment || pendingAttachment?.file;
     if (sending || (!text.trim() && !attachment) || !selected) return;
     const id = uid();
     const body: Record<string, string> = {};
@@ -621,6 +676,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
         return;
       }
     }
+    clearPendingAttachment();
     await postChatMessage(body, id);
   };
 
@@ -717,9 +773,19 @@ export function Chat({ go }: { go: (p: string) => void }) {
   };
 
   const insertEmoji = (emoji: string) => {
-    setText((value) => `${value}${emoji}`);
-    setEmojiOpen(false);
-    inputRef.current?.focus();
+    const el = inputRef.current;
+    if (el) {
+      const start = el.selectionStart ?? text.length;
+      const end = el.selectionEnd ?? text.length;
+      const next = text.slice(0, start) + emoji + text.slice(end);
+      setText(next);
+      setTimeout(() => {
+        el.focus();
+        el.setSelectionRange(start + emoji.length, start + emoji.length);
+      }, 0);
+    } else {
+      setText((value) => `${value}${emoji}`);
+    }
   };
 
   const startCall = async (type: 'AUDIO' | 'VIDEO') => {
@@ -823,10 +889,20 @@ export function Chat({ go }: { go: (p: string) => void }) {
               <Search size={17} aria-hidden="true" />
               <input
                 aria-label="Search conversations"
-                placeholder="Search conversations"
+                placeholder="Search conversations..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              {search && (
+                <button
+                  type="button"
+                  className="msg-search-clear"
+                  aria-label="Clear search"
+                  onClick={() => setSearch('')}
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
             <div className="msg-filter-tabs" role="tablist" aria-label="Conversation filters">
               <button type="button" role="tab" aria-selected={listFilter === 'all'} className={listFilter === 'all' ? 'active' : ''} onClick={() => setListFilter('all')}>All</button>
@@ -868,7 +944,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
                   setSelected(c.id);
                   go(`/messages/${encodeURIComponent(c.id)}`);
                 }}
-                className={`conversation-row msg-row ${selected === c.id ? 'selected' : ''}`}
+                className={`conversation-row msg-row ${selected === c.id ? 'selected' : ''} ${c.unreadCount > 0 ? 'has-unread' : ''}`}
               >
                 <span className="msg-avatar-wrap">
                   <Avatar user={c.otherUser} size={46} />
@@ -915,11 +991,19 @@ export function Chat({ go }: { go: (p: string) => void }) {
 
         <section className={`chat-window msg-pane ${!selected ? 'hidden-mobile' : ''}`} aria-label="Conversation">
           {!convo ? (
-            <Empty
-              title="Select a conversation"
-              detail="Choose someone from the list, or head to Matches to start a new chat."
-              icon={<MessageSquare size={28} />}
-            />
+            <div className="msg-pane-welcome">
+              <div className="msg-welcome-card">
+                <div className="msg-welcome-icon" aria-hidden="true">
+                  <MessageSquare size={34} />
+                </div>
+                <h2>Your Messages</h2>
+                <p>Select someone from the list to start chatting, or browse new matches to connect with.</p>
+                <div className="msg-welcome-actions">
+                  <Button onClick={() => go('/matches')}>Browse Matches</Button>
+                  <Button tone="outline" onClick={() => go('/discover')}>Discover People</Button>
+                </div>
+              </div>
+            </div>
           ) : (
             <>
               <div className="chat-window-header msg-pane-header">
@@ -934,23 +1018,37 @@ export function Chat({ go }: { go: (p: string) => void }) {
                 >
                   <ArrowLeft />
                 </button>
-                <span className="msg-avatar-wrap">
-                  <Avatar user={convo.otherUser} size={44} />
-                  <span
-                    className={`msg-presence ${peerOnline ? 'online' : 'offline'}`}
-                    title={peerOnline ? 'Online' : 'Offline'}
-                    aria-hidden="true"
-                  />
-                </span>
-                <div className="chat-window-person">
-                  <strong>{convo.otherUser.displayName}</strong>
-                  <span className={typing || peerOnline ? 'msg-status-live' : 'msg-status-away'}>
-                    {peerStatusLabel(convo.otherUser, typing)}
+                <div
+                  className="chat-window-person-clickable"
+                  role="button"
+                  tabIndex={0}
+                  title={`View ${convo.otherUser.displayName}'s profile`}
+                  onClick={() => go(`/members/${encodeURIComponent(convo.otherUser.id)}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') go(`/members/${encodeURIComponent(convo.otherUser.id)}`);
+                  }}
+                >
+                  <span className="msg-avatar-wrap">
+                    <Avatar user={convo.otherUser} size={44} />
+                    <span
+                      className={`msg-presence ${peerOnline ? 'online' : 'offline'}`}
+                      title={peerOnline ? 'Online' : 'Offline'}
+                      aria-hidden="true"
+                    />
                   </span>
+                  <div className="chat-window-person">
+                    <strong className="msg-person-name">
+                      {convo.otherUser.displayName}
+                      <span className="msg-view-profile-hint">View profile &rarr;</span>
+                    </strong>
+                    <span className={typing || peerOnline ? 'msg-status-live' : 'msg-status-away'}>
+                      {peerStatusLabel(convo.otherUser, typing)}
+                    </span>
+                  </div>
                 </div>
                 <div className="msg-header-actions">
-                  <button type="button" className="msg-icon-btn" aria-label="Voice call" onClick={() => void startCall('AUDIO')}><Phone size={18} /></button>
-                  <button type="button" className="msg-icon-btn" aria-label="Video call" onClick={() => void startCall('VIDEO')}><Video size={18} /></button>
+                  <button type="button" className="msg-icon-btn" aria-label="Voice call" title="Voice call" onClick={() => void startCall('AUDIO')}><Phone size={18} /></button>
+                  <button type="button" className="msg-icon-btn" aria-label="Video call" title="Video call" onClick={() => void startCall('VIDEO')}><Video size={18} /></button>
                   <button
                     type="button"
                     className="msg-icon-btn"
@@ -965,6 +1063,9 @@ export function Chat({ go }: { go: (p: string) => void }) {
 
               {options && (
                 <div className="chat-options">
+                  <Button tone="outline" onClick={() => go(`/members/${encodeURIComponent(convo.otherUser.id)}`)}>
+                    <User size={14} /> View profile
+                  </Button>
                   <Button tone="outline" onClick={() => void unmatchAction()}>Unmatch</Button>
                   <Button tone="outline" onClick={() => { setReport({ type: 'user', id: convo.otherUser.id }); setOptions(false); }}>
                     <Flag size={14} /> Report
@@ -979,10 +1080,29 @@ export function Chat({ go }: { go: (p: string) => void }) {
                   {msgLoading ? (
                     <Loading label="Loading messages..." />
                   ) : messages.length === 0 ? (
-                    <div className="chat-empty">
-                      <Heart fill="currentColor" size={29} />
+                    <div className="msg-icebreakers-card">
+                      <div className="msg-icebreakers-avatar-wrap">
+                        <Avatar user={convo.otherUser} size={64} />
+                        <span className={`msg-presence large ${peerOnline ? 'online' : 'offline'}`} />
+                      </div>
                       <h3>Say hi to {convo.otherUser.displayName}!</h3>
-                      <p>Break the ice with a friendly greeting.</p>
+                      <p>Break the ice with a friendly greeting, or tap a starter to get things flowing:</p>
+                      <div className="msg-icebreaker-chips">
+                        {ICEBREAKER_PROMPTS.map((prompt) => (
+                          <button
+                            key={prompt}
+                            type="button"
+                            className="msg-icebreaker-chip"
+                            onClick={() => {
+                              setText(prompt);
+                              inputRef.current?.focus();
+                            }}
+                          >
+                            <Sparkles size={14} className="msg-sparkle-icon" />
+                            <span>{prompt}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   ) : (
                     messages.map((msg, index) => {
@@ -1058,12 +1178,25 @@ export function Chat({ go }: { go: (p: string) => void }) {
                               )}
                               {menuOpen && !unsent && (
                                 <div className="msg-bubble-menu" role="menu">
+                                  {msg.text && (
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => {
+                                        void navigator.clipboard.writeText(msg.text || '');
+                                        notify('Message copied to clipboard');
+                                        setMessageMenu(null);
+                                      }}
+                                    >
+                                      <Copy size={13} /> Copy text
+                                    </button>
+                                  )}
                                   <button type="button" role="menuitem" onClick={() => void deleteMessageForMe(msg.id)}>
-                                    Delete for me
+                                    <Trash2 size={13} /> Delete for me
                                   </button>
                                   {mine && (
                                     <button type="button" role="menuitem" onClick={() => void unsendMessageAction(msg.id)}>
-                                      Delete for everyone
+                                      <Trash2 size={13} /> Delete for everyone
                                     </button>
                                   )}
                                   {!mine && !call && (
@@ -1075,7 +1208,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
                                         setMessageMenu(null);
                                       }}
                                     >
-                                      Report
+                                      <Flag size={13} /> Report
                                     </button>
                                   )}
                                 </div>
@@ -1116,119 +1249,155 @@ export function Chat({ go }: { go: (p: string) => void }) {
                   void submit();
                 }}
               >
-                <div className="msg-attach-wrap">
-                  <button
-                    type="button"
-                    className="msg-icon-btn"
-                    aria-label="Attachment menu"
-                    aria-expanded={attachOpen}
-                    onClick={() => {
-                      setAttachOpen((open) => !open);
-                      setEmojiOpen(false);
-                    }}
-                  >
-                    <Plus size={18} />
-                  </button>
-                  {attachOpen && (
-                    <div className="msg-attach-menu" role="menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setAttachOpen(false);
-                          fileInputRef.current?.click();
-                        }}
-                      >
-                        <ImagePlus size={16} /> Photo
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          void openGiftPicker();
-                        }}
-                      >
-                        <Gift size={16} /> Gift
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setAttachOpen(false);
-                          notify('More attachments are coming soon.');
-                        }}
-                      >
-                        <Paperclip size={16} /> File
-                      </button>
+                {pendingAttachment && (
+                  <div className="msg-attachment-preview">
+                    <div className="msg-preview-thumb">
+                      <img src={pendingAttachment.previewUrl} alt="Preview" />
                     </div>
-                  )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    hidden
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void submit(f);
-                      e.target.value = '';
-                    }}
-                  />
-                </div>
-                <div className="msg-composer-field">
-                  <textarea
-                    ref={inputRef}
-                    aria-label="Write a message"
-                    value={text}
-                    maxLength={1000}
-                    rows={1}
-                    placeholder="Type a message..."
-                    onCompositionStart={() => { composingRef.current = true; }}
-                    onCompositionEnd={() => { composingRef.current = false; }}
-                    onBlur={() => {
-                      if (selected) socketRef.current?.emit('typing', { conversationId: selected, isTyping: false });
-                    }}
-                    onChange={(e) => {
-                      setText(e.target.value);
-                      if (selected && Date.now() - typingAt.current > 3000) {
-                        socketRef.current?.emit('typing', { conversationId: selected, isTyping: true });
-                        typingAt.current = Date.now();
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key !== 'Enter' || e.shiftKey) return;
-                      if (e.nativeEvent.isComposing || composingRef.current || e.keyCode === 229) return;
-                      e.preventDefault();
-                      if (canSend) void submit();
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="msg-emoji-btn"
-                    aria-label="Insert emoji"
-                    aria-expanded={emojiOpen}
-                    onClick={() => {
-                      setEmojiOpen((open) => !open);
-                      setAttachOpen(false);
-                    }}
-                  >
-                    <Smile size={18} />
-                  </button>
-                  {emojiOpen && (
-                    <div className="msg-emoji-popover" role="listbox" aria-label="Emoji">
-                      {QUICK_EMOJI.map((emoji) => (
-                        <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>
-                      ))}
+                    <div className="msg-preview-meta">
+                      <strong>{pendingAttachment.file.name}</strong>
+                      <span>{(pendingAttachment.file.size / 1024).toFixed(0)} KB · Ready to send</span>
                     </div>
-                  )}
+                    <button
+                      type="button"
+                      className="msg-preview-remove"
+                      onClick={clearPendingAttachment}
+                      aria-label="Remove image"
+                      title="Remove image"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                )}
+
+                <div className="msg-composer-row">
+                  <div className="msg-composer-tools">
+                    <button
+                      type="button"
+                      className="msg-icon-btn"
+                      title="Attach photo"
+                      aria-label="Attach photo"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <ImagePlus size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      className="msg-icon-btn msg-gift-action-btn"
+                      title="Send gift"
+                      aria-label="Send gift"
+                      onClick={() => void openGiftPicker()}
+                    >
+                      <Gift size={18} />
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      hidden
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleFileSelected(f);
+                        e.target.value = '';
+                      }}
+                    />
+                  </div>
+
+                  <div className="msg-composer-field">
+                    <textarea
+                      ref={inputRef}
+                      aria-label="Write a message"
+                      value={text}
+                      maxLength={1000}
+                      rows={1}
+                      placeholder={pendingAttachment ? "Add a caption... (Enter to send)" : "Type a message... (Enter to send, Shift+Enter for new line)"}
+                      onCompositionStart={() => { composingRef.current = true; }}
+                      onCompositionEnd={() => { composingRef.current = false; }}
+                      onBlur={() => {
+                        if (selected) socketRef.current?.emit('typing', { conversationId: selected, isTyping: false });
+                      }}
+                      onPaste={(e) => {
+                        const items = e.clipboardData?.items;
+                        if (!items) return;
+                        for (let i = 0; i < items.length; i++) {
+                          if (items[i].type.startsWith('image/')) {
+                            const file = items[i].getAsFile();
+                            if (file) {
+                              e.preventDefault();
+                              handleFileSelected(file);
+                              break;
+                            }
+                          }
+                        }
+                      }}
+                      onChange={(e) => {
+                        setText(e.target.value);
+                        if (selected && Date.now() - typingAt.current > 3000) {
+                          socketRef.current?.emit('typing', { conversationId: selected, isTyping: true });
+                          typingAt.current = Date.now();
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' || e.shiftKey) return;
+                        if (e.nativeEvent.isComposing || composingRef.current || e.keyCode === 229) return;
+                        e.preventDefault();
+                        if (canSend) void submit();
+                      }}
+                    />
+                    <div className="msg-composer-field-actions" ref={emojiPickerRef}>
+                      <button
+                        type="button"
+                        className={`msg-emoji-btn ${emojiOpen ? 'active' : ''}`}
+                        aria-label="Insert emoji"
+                        aria-expanded={emojiOpen}
+                        onClick={() => {
+                          setEmojiOpen((open) => !open);
+                          setAttachOpen(false);
+                        }}
+                      >
+                        <Smile size={18} />
+                      </button>
+                      {emojiOpen && (
+                        <div className="msg-emoji-popover" role="dialog" aria-label="Emoji picker">
+                          <div className="msg-emoji-category-tabs">
+                            {EMOJI_CATEGORIES.map((cat, idx) => (
+                              <button
+                                key={cat.name}
+                                type="button"
+                                className={`msg-emoji-cat-tab ${emojiTab === idx ? 'active' : ''}`}
+                                onClick={() => setEmojiTab(idx)}
+                              >
+                                <span>{cat.icon}</span> {cat.name}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="msg-emoji-grid">
+                            {EMOJI_CATEGORIES[emojiTab]?.list.map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                className="msg-emoji-cell"
+                                onClick={() => insertEmoji(emoji)}
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="msg-send"
+                    aria-label="Send message"
+                    disabled={!canSend}
+                    title={canSend ? "Send message (Enter)" : "Type a message to send"}
+                  >
+                    <Send size={18} />
+                  </button>
                 </div>
-                <button
-                  type="submit"
-                  className="msg-send"
-                  aria-label="Send message"
-                  disabled={!canSend}
-                >
-                  <Send size={18} />
-                </button>
               </form>
             </>
           )}

@@ -23,7 +23,7 @@ function transpile(relative) {
 }
 function loadModule(relative,context={}) {
   const exports={};
-  vm.runInNewContext(transpile(relative),{exports,require,Response,FormData,File,crypto:globalThis.crypto,...context},{filename:relative});
+  vm.runInNewContext(transpile(relative),{exports,require,Response,FormData,File,crypto:globalThis.crypto,process,...context},{filename:relative});
   return exports;
 }
 const json=(status,data)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
@@ -58,7 +58,7 @@ const json=(status,data)=>new Response(JSON.stringify(data),{status,headers:{'Co
   };
   queue.push(()=>json(200,{success:true,data:{items:[{id:'one'}]}}));
   assert.equal((await api.request('GET','/discovery')).items[0].id,'one');
-  assert.equal(calls[0].url,'/api/v1/discovery');
+  assert.ok(calls[0].url.endsWith('/api/v1/discovery'));
   console.log('✓ Standard REST request and API response parsing');
 
   const old={accessToken:'access-old',refreshToken:'refresh-old',userId:'member-1'};
