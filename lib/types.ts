@@ -27,6 +27,7 @@ export type ChatGift = {
   emoji?: string;
   imageUrl?: string;
   priceCoins?: number;
+  giftCategory?: 'FREE' | 'POPULAR' | 'PREMIUM';
 };
 export type ChatPaidEmoji = {
   packId: string;
@@ -49,6 +50,7 @@ export type StoreItem = {
   imageUrl?: string;
   emojis?: string[];
   priceCoins?: number;
+  giftCategory?: 'FREE' | 'POPULAR' | 'PREMIUM';
   priceMoneyMinor?: number;
   currency?: string;
   coinAmount?: number;

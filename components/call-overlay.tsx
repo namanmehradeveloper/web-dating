@@ -1,8 +1,21 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import type AgoraRTCType from 'agora-rtc-sdk-ng';
-import { Camera, CameraOff, Mic, MicOff, Phone, PhoneOff, SwitchCamera } from 'lucide-react';
+import type { Socket } from 'socket.io-client';
+import { Lottie } from 'lottie-react';
+import {
+  Camera, CameraOff, Gift, Mic, MicOff, MoreHorizontal, Phone, PhoneOff,
+  Plus, Sparkles, SwitchCamera, X, Aperture, Coins,
+} from 'lucide-react';
+import { ApiFailure, mediaUrl, messageOf, request } from '@/lib/api';
+import type { StoreItem, StoreWallet } from '@/lib/types';
+import {
+  BEAUTY_PRESETS, BackgroundBlurEngine, DEFAULT_BEAUTY, buildBeautyCssFilter,
+  type BeautyPresetId, type BeautyState,
+} from '@/lib/call-beauty';
+import { GIFT_BURST_LOTTIE, type CallGiftEvent } from '@/lib/gift-lottie';
 
 export type CallInfo = {
   id: string;
@@ -13,6 +26,7 @@ export type CallInfo = {
   status: 'RINGING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'MISSED' | 'BUSY' | 'ENDED';
   createdAt: string;
   ringExpiresAt: string;
+  acceptedAt?: string | null;
 };
 
 export type AgoraCredentials = {
@@ -29,9 +43,14 @@ export type ActiveCall = {
   credentials: AgoraCredentials | null;
 };
 
+type GiftTab = 'FREE' | 'POPULAR' | 'PREMIUM' | 'ALL';
+
 type Props = {
   activeCall: ActiveCall;
   peerName: string;
+  peerPhotoUrl?: string;
+  currentUserId?: string;
+  socket?: Socket | null;
   onAccept: () => Promise<void>;
   onReject: () => Promise<void>;
   onCancel: () => Promise<void>;
@@ -42,10 +61,26 @@ type AgoraClient = ReturnType<typeof AgoraRTCType.createClient>;
 type AudioTrack = Awaited<ReturnType<typeof AgoraRTCType.createMicrophoneAudioTrack>>;
 type VideoTrack = Awaited<ReturnType<typeof AgoraRTCType.createCameraVideoTrack>>;
 
-export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel, onEnd }: Props) {
+function formatDuration(totalSeconds: number) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function clientGiftId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `gift_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+export function CallOverlay({
+  activeCall, peerName, peerPhotoUrl, currentUserId, socket,
+  onAccept, onReject, onCancel, onEnd,
+}: Props) {
   const { call, direction, credentials } = activeCall;
   const localPreview = useRef<HTMLDivElement | null>(null);
   const remotePreview = useRef<HTMLDivElement | null>(null);
+  const blurCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const blurEngineRef = useRef<BackgroundBlurEngine | null>(null);
   const clientRef = useRef<AgoraClient | null>(null);
   const localAudio = useRef<AudioTrack | null>(null);
   const localVideo = useRef<VideoTrack | null>(null);
@@ -54,29 +89,102 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
   const [mediaReady, setMediaReady] = useState(false);
   const [rtcError, setRtcError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [beautyOpen, setBeautyOpen] = useState(false);
+  const [giftsOpen, setGiftsOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [beauty, setBeauty] = useState<BeautyState>(DEFAULT_BEAUTY);
+  const [blurActive, setBlurActive] = useState(false);
+  const [wallet, setWallet] = useState<StoreWallet | null>(null);
+  const [gifts, setGifts] = useState<StoreItem[]>([]);
+  const [giftTab, setGiftTab] = useState<GiftTab>('POPULAR');
+  const [selectedGiftId, setSelectedGiftId] = useState<string>('');
+  const [giftBusy, setGiftBusy] = useState(false);
+  const [giftError, setGiftError] = useState('');
+  const [needRecharge, setNeedRecharge] = useState(false);
+  const [fx, setFx] = useState<CallGiftEvent | null>(null);
+  const fxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const video = call.type === 'VIDEO';
+  const live = call.status === 'ACCEPTED';
+  const beautyCss = useMemo(() => buildBeautyCssFilter(beauty), [beauty]);
 
   useEffect(() => {
     setMuted(false);
     setCameraEnabled(true);
     setMediaReady(false);
     setRtcError('');
+    setBeautyOpen(false);
+    setGiftsOpen(false);
+    setMoreOpen(false);
+    setGiftError('');
+    setNeedRecharge(false);
+    setElapsed(0);
   }, [call.id]);
 
   useEffect(() => {
-    if (call.status !== 'RINGING') return;
+    if (!live) return;
+    const startedAt = call.acceptedAt ? Date.parse(call.acceptedAt) : Date.now();
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [live, call.acceptedAt, call.id]);
 
+  useEffect(() => {
+    if (call.status !== 'RINGING') return;
     const audio = new Audio(direction === 'INCOMING' ? '/sounds/ringtone.mp3' : '/sounds/ringback.mp3');
     audio.loop = true;
     audio.volume = direction === 'INCOMING' ? 0.85 : 0.65;
-    void audio.play().catch(() => {
-      // Autoplay may be blocked until a user gesture; ringing UI still works.
-    });
-
+    void audio.play().catch(() => {});
     return () => {
       audio.pause();
       audio.currentTime = 0;
     };
   }, [call.id, call.status, direction]);
+
+  const showGiftFx = useCallback((event: CallGiftEvent) => {
+    if (fxTimer.current) clearTimeout(fxTimer.current);
+    setFx(event);
+    fxTimer.current = setTimeout(() => setFx(null), 4200);
+  }, []);
+
+  useEffect(() => {
+    if (!socket || !live) return;
+    const onGift = (payload: CallGiftEvent) => {
+      if (payload.callId !== call.id) return;
+      showGiftFx(payload);
+      if (payload.fromUserId === currentUserId) return;
+    };
+    socket.on('call:gift', onGift);
+    return () => {
+      socket.off('call:gift', onGift);
+    };
+  }, [socket, live, call.id, currentUserId, showGiftFx]);
+
+  useEffect(() => () => {
+    if (fxTimer.current) clearTimeout(fxTimer.current);
+  }, []);
+
+  const refreshStore = useCallback(async () => {
+    try {
+      const [cat, wal] = await Promise.all([
+        request<{ gifts: StoreItem[] }>('GET', '/store/catalog'),
+        request<StoreWallet>('GET', '/store/wallet'),
+      ]);
+      const list = cat.gifts || [];
+      setGifts(list);
+      setWallet(wal);
+      setSelectedGiftId((prev) => prev || list.find((g) => g.id === 'gift_rose')?.id || list[0]?.id || '');
+    } catch (error) {
+      setGiftError(messageOf(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!live || !video) return;
+    void refreshStore();
+  }, [live, video, refreshStore]);
 
   useEffect(() => {
     if (!credentials || call.status !== 'ACCEPTED') return;
@@ -97,7 +205,6 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
           await client.subscribe(user, mediaType);
           if (disposed) return;
           if (mediaType === 'video' && user.videoTrack && remotePreview.current) {
-            // contain keeps faces at natural proportion (avoids cover-crop zoom).
             user.videoTrack.play(remotePreview.current, { fit: 'contain' });
           }
           if (mediaType === 'audio') user.audioTrack?.play();
@@ -152,6 +259,8 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
     void join();
     return () => {
       disposed = true;
+      blurEngineRef.current?.stop();
+      blurEngineRef.current = null;
       client?.removeAllListeners();
       audioTrack?.stop();
       audioTrack?.close();
@@ -171,6 +280,46 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
     credentials?.token,
     credentials?.uid,
   ]);
+
+  // Apply CSS beauty filters to local Agora video element + optional MediaPipe blur.
+  useEffect(() => {
+    if (!video || !live || !mediaReady) return;
+    const root = localPreview.current;
+    if (!root) return;
+    const videoEl = root.querySelector('video') as HTMLVideoElement | null;
+    if (!videoEl) return;
+    videoEl.style.filter = beauty.preset === 'blur' ? 'none' : beautyCss;
+    videoEl.style.transition = 'filter .2s ease';
+
+    const wantsBlur = beauty.preset === 'blur';
+    if (!wantsBlur) {
+      blurEngineRef.current?.stop();
+      blurEngineRef.current = null;
+      setBlurActive(false);
+      return;
+    }
+
+    const canvas = blurCanvasRef.current;
+    if (!canvas) return;
+    blurEngineRef.current?.stop();
+    const engine = new BackgroundBlurEngine(videoEl, canvas, beauty.blurAmount);
+    engine.setBlurAmount(beauty.blurAmount);
+    blurEngineRef.current = engine;
+    setBlurActive(true);
+    void engine.start().catch((error) => {
+      setRtcError(error instanceof Error ? error.message : 'Background blur failed to start.');
+      setBlurActive(false);
+    });
+
+    return () => {
+      engine.stop();
+      if (blurEngineRef.current === engine) blurEngineRef.current = null;
+    };
+  }, [beauty, beautyCss, video, live, mediaReady]);
+
+  useEffect(() => {
+    blurEngineRef.current?.setBlurAmount(beauty.blurAmount);
+  }, [beauty.blurAmount]);
 
   const toggleMute = async () => {
     const track = localAudio.current;
@@ -213,6 +362,28 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
     }
   };
 
+  const captureScreenshot = () => {
+    const remoteVideo = remotePreview.current?.querySelector('video') as HTMLVideoElement | null;
+    if (!remoteVideo) {
+      setRtcError('No video frame available to capture.');
+      return;
+    }
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = remoteVideo.videoWidth || 1280;
+      canvas.height = remoteVideo.videoHeight || 720;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(remoteVideo, 0, 0, canvas.width, canvas.height);
+      const link = document.createElement('a');
+      link.download = `dating-cloud-call-${Date.now()}.jpg`;
+      link.href = canvas.toDataURL('image/jpeg', 0.92);
+      link.click();
+    } catch (error) {
+      setRtcError(error instanceof Error ? error.message : 'Unable to capture screenshot.');
+    }
+  };
+
   const runAction = async (action: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -222,33 +393,229 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
     }
   };
 
+  const filteredGifts = useMemo(() => {
+    if (giftTab === 'ALL') return gifts;
+    if (giftTab === 'FREE') return gifts.filter((g) => (g.giftCategory || '') === 'FREE' || (g.priceCoins || 0) === 0);
+    return gifts.filter((g) => (g.giftCategory || 'POPULAR') === giftTab);
+  }, [gifts, giftTab]);
+
+  const selectedGift = gifts.find((g) => g.id === selectedGiftId) || filteredGifts[0] || null;
+
+  const sendGift = async () => {
+    if (!selectedGift || giftBusy) return;
+    setGiftBusy(true);
+    setGiftError('');
+    setNeedRecharge(false);
+    try {
+      const result = await request<{
+        gift: CallGiftEvent['gift'];
+        wallet: StoreWallet;
+        event: CallGiftEvent;
+      }>('POST', `/calls/${call.id}/gifts`, {
+        body: { giftItemId: selectedGift.id, clientMessageId: clientGiftId() },
+      });
+      setWallet(result.wallet);
+      showGiftFx(result.event);
+    } catch (error) {
+      const insufficient = error instanceof ApiFailure
+        && error.details?.some((d) => d.reason === 'INSUFFICIENT_COINS');
+      if (insufficient) {
+        setNeedRecharge(true);
+        setGiftError('Not enough coins. Recharge to keep gifting.');
+      } else {
+        setGiftError(messageOf(error));
+      }
+    } finally {
+      setGiftBusy(false);
+    }
+  };
+
+  const selectPreset = (id: BeautyPresetId) => {
+    setBeauty((prev) => ({
+      ...prev,
+      preset: id,
+      blurAmount: id === 'blur' ? Math.max(prev.blurAmount, 55) : prev.blurAmount,
+    }));
+  };
+
   const incoming = direction === 'INCOMING' && call.status === 'RINGING';
   const outgoing = direction === 'OUTGOING' && call.status === 'RINGING';
-  const video = call.type === 'VIDEO';
 
   return (
-    <div className={`call-overlay ${video && call.status === 'ACCEPTED' ? 'video-call' : ''}`} role="dialog" aria-modal="true" aria-label={`${video ? 'Video' : 'Audio'} call`}>
-      {video && call.status === 'ACCEPTED' && (
+    <div className={`call-overlay ${video && live ? 'video-call' : ''}`} role="dialog" aria-modal="true" aria-label={`${video ? 'Video' : 'Audio'} call`}>
+      {video && live && (
         <div className="call-video-stage">
           <div className="call-remote-video" ref={remotePreview} aria-label="Remote video" />
-          <div className="call-local-video" ref={localPreview} aria-label="Your video preview" />
+          <div className={`call-local-video${blurActive ? ' call-local-blurred' : ''}`} ref={localPreview} aria-label="Your video preview">
+            <canvas ref={blurCanvasRef} className="call-blur-canvas" aria-hidden={!blurActive} />
+          </div>
+
+          <header className="call-topbar">
+            <div className="call-topbar-left">
+              <div className="call-brand" aria-hidden>
+                <span className="call-brand-mark">❤</span>
+                <strong>Dating Cloud</strong>
+              </div>
+              <div className="call-peer-pill">
+                {peerPhotoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={peerPhotoUrl} alt="" className="call-peer-avatar" />
+                ) : (
+                  <span className="call-peer-avatar call-peer-avatar-fallback">{(peerName || 'D').slice(0, 1)}</span>
+                )}
+                <div>
+                  <strong>{peerName || 'Dating Cloud member'}</strong>
+                  <span><i className="call-live-dot" /> Live · {formatDuration(elapsed)}</span>
+                </div>
+              </div>
+            </div>
+            <div className="call-topbar-right">
+              <div className="call-coin-chip" title="Coin balance">
+                <Coins size={15} aria-hidden />
+                <strong>{(wallet?.coinBalance ?? 0).toLocaleString()}</strong>
+                <Link href="/store" className="call-coin-add" aria-label="Recharge coins" title="Recharge">
+                  <Plus size={14} />
+                </Link>
+              </div>
+              <button type="button" className="call-icon-btn" aria-label="End call" disabled={busy} onClick={() => void runAction(onEnd)}>
+                <X size={18} />
+              </button>
+            </div>
+          </header>
+
+          <aside className="call-side-rail" aria-label="Call tools">
+            <button type="button" className={beautyOpen ? 'active' : ''} aria-pressed={beautyOpen} title="Beauty filters" onClick={() => { setBeautyOpen((v) => !v); setGiftsOpen(false); }}>
+              <Sparkles size={18} />
+              <span>Filters</span>
+            </button>
+            <button type="button" className={giftsOpen ? 'active' : ''} aria-pressed={giftsOpen} title="Send gift" onClick={() => { setGiftsOpen((v) => !v); setBeautyOpen(false); void refreshStore(); }}>
+              <Gift size={18} />
+              <span>Gifts</span>
+            </button>
+          </aside>
+
+          {beautyOpen && (
+            <div className="call-glass-panel call-beauty-panel" role="dialog" aria-label="Beauty filters">
+              <div className="call-panel-head">
+                <strong>Beauty filters</strong>
+                <button type="button" className="call-icon-btn" aria-label="Close filters" onClick={() => setBeautyOpen(false)}><X size={16} /></button>
+              </div>
+              <div className="call-filter-grid">
+                {BEAUTY_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={`call-filter-swatch${beauty.preset === preset.id ? ' selected' : ''}`}
+                    onClick={() => selectPreset(preset.id)}
+                  >
+                    <span className={`call-filter-preview tone-${preset.id}`} aria-hidden />
+                    <em>{preset.label}</em>
+                    {beauty.preset === preset.id && <i className="call-filter-check" aria-hidden>✓</i>}
+                  </button>
+                ))}
+              </div>
+              <label className="call-slider">
+                <span>Smooth <strong>{beauty.smooth}</strong></span>
+                <input type="range" min={0} max={100} value={beauty.smooth} onChange={(e) => setBeauty((p) => ({ ...p, smooth: Number(e.target.value) }))} />
+              </label>
+              <label className="call-slider">
+                <span>{beauty.preset === 'blur' ? 'Blur' : 'Brightness'} <strong>{beauty.preset === 'blur' ? beauty.blurAmount : beauty.brightness}</strong></span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={beauty.preset === 'blur' ? beauty.blurAmount : beauty.brightness}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setBeauty((p) => (p.preset === 'blur' ? { ...p, blurAmount: value } : { ...p, brightness: value }));
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
+          {giftsOpen && (
+            <div className="call-glass-panel call-gifts-panel" role="dialog" aria-label="Send gift">
+              <div className="call-panel-head">
+                <strong>Send Gift</strong>
+                <button type="button" className="call-icon-btn" aria-label="Close gifts" onClick={() => setGiftsOpen(false)}><X size={16} /></button>
+              </div>
+              <div className="call-gift-tabs" role="tablist">
+                {(['FREE', 'POPULAR', 'PREMIUM', 'ALL'] as GiftTab[]).map((tab) => (
+                  <button key={tab} type="button" role="tab" aria-selected={giftTab === tab} className={giftTab === tab ? 'current' : ''} onClick={() => setGiftTab(tab)}>
+                    {tab === 'ALL' ? 'All' : tab.charAt(0) + tab.slice(1).toLowerCase()}
+                  </button>
+                ))}
+              </div>
+              <div className="call-gift-grid">
+                {filteredGifts.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`call-gift-card${selectedGift?.id === item.id ? ' selected' : ''}`}
+                    onClick={() => setSelectedGiftId(item.id)}
+                  >
+                    <span className="call-gift-emoji" aria-hidden>{item.emoji || '🎁'}</span>
+                    <strong>{item.title}</strong>
+                    <small>{(item.priceCoins || 0) === 0 ? 'Free' : `${item.priceCoins} coins`}</small>
+                  </button>
+                ))}
+                {!filteredGifts.length && <p className="call-gift-empty">No gifts in this category.</p>}
+              </div>
+              {giftError && <p className="call-error" role="status">{giftError}</p>}
+              {needRecharge ? (
+                <Link href="/store" className="call-send-gift call-recharge-cta">Recharge coins</Link>
+              ) : (
+                <button
+                  type="button"
+                  className="call-send-gift"
+                  disabled={!selectedGift || giftBusy}
+                  onClick={() => void sendGift()}
+                >
+                  {giftBusy ? 'Sending…' : `Send${selectedGift ? ` (${(selectedGift.priceCoins || 0) === 0 ? 'Free' : `${selectedGift.priceCoins} Coins`})` : ''}`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {fx && (
+            <div className="call-gift-fx" aria-live="polite">
+              <div className="call-gift-toast">
+                {fx.fromPhotoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={mediaUrl(fx.fromPhotoUrl)} alt="" />
+                ) : (
+                  <span className="call-peer-avatar call-peer-avatar-fallback">{(fx.fromName || '?').slice(0, 1)}</span>
+                )}
+                <p><strong>{fx.fromName}</strong> sent you a {fx.gift.title} {fx.gift.emoji || ''}</p>
+              </div>
+              <div className="call-gift-lottie">
+                <Lottie src={GIFT_BURST_LOTTIE as unknown as object} autoplay loop={false} />
+                <span className="call-gift-lottie-emoji" aria-hidden>{fx.gift.emoji || '🎁'}</span>
+              </div>
+            </div>
+          )}
+
           {!mediaReady && <span className="call-media-status">Connecting media…</span>}
         </div>
       )}
-      <div className={`call-panel${video && call.status === 'ACCEPTED' ? ' call-panel-video' : ''}`}>
+
+      <div className={`call-panel${video && live ? ' call-panel-video' : ''}`}>
         {!video && (
           <span className="call-avatar"><Phone size={28} /></span>
         )}
-        <div className="call-panel-meta">
-          <span className="call-eyebrow">{video ? 'VIDEO CALL' : 'AUDIO CALL'}</span>
-          <h2>{peerName || 'Dating Cloud member'}</h2>
-          <p>
-            {incoming ? 'Incoming call' : outgoing ? 'Calling…' : mediaReady ? 'Connected' : call.status === 'ACCEPTED' ? 'Connecting…' : 'Connecting call…'}
-          </p>
-        </div>
+        {!(video && live) && (
+          <div className="call-panel-meta">
+            <span className="call-eyebrow">{video ? 'VIDEO CALL' : 'AUDIO CALL'}</span>
+            <h2>{peerName || 'Dating Cloud member'}</h2>
+            <p>
+              {incoming ? 'Incoming call' : outgoing ? 'Calling…' : mediaReady ? 'Connected' : call.status === 'ACCEPTED' ? 'Connecting…' : 'Connecting call…'}
+            </p>
+          </div>
+        )}
         {rtcError && <p className="call-error" role="status">{rtcError}</p>}
 
-        {call.status === 'ACCEPTED' && (
+        {live && (
           <div className="call-controls" role="toolbar" aria-label="Call controls">
             <button type="button" className={`call-control ${muted ? 'active' : ''}`} aria-label={muted ? 'Unmute microphone' : 'Mute microphone'} title={muted ? 'Unmute' : 'Mute'} onClick={() => void toggleMute()} disabled={!localAudio.current}>
               {muted ? <MicOff /> : <Mic />}
@@ -258,14 +625,52 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
                 <button type="button" className={`call-control ${!cameraEnabled ? 'active' : ''}`} aria-label={cameraEnabled ? 'Turn camera off' : 'Turn camera on'} title={cameraEnabled ? 'Camera off' : 'Camera on'} onClick={() => void toggleCamera()} disabled={!localVideo.current}>
                   {cameraEnabled ? <Camera /> : <CameraOff />}
                 </button>
-                <button type="button" className="call-control" aria-label="Switch camera" title="Switch camera" onClick={() => void switchCamera()} disabled={!localVideo.current}>
-                  <SwitchCamera />
+                <button
+                  type="button"
+                  className={`call-control ${beautyOpen ? 'accent' : ''}`}
+                  aria-label="Beauty filters"
+                  title="Beauty filters"
+                  onClick={() => { setBeautyOpen((v) => !v); setGiftsOpen(false); }}
+                >
+                  <Sparkles />
+                </button>
+                <button
+                  type="button"
+                  className={`call-control ${giftsOpen ? 'accent' : ''}`}
+                  aria-label="Send gift"
+                  title="Send gift"
+                  onClick={() => { setGiftsOpen((v) => !v); setBeautyOpen(false); void refreshStore(); }}
+                >
+                  <Gift />
+                </button>
+                <button type="button" className="call-control" aria-label="Take screenshot" title="Screenshot" onClick={captureScreenshot}>
+                  <Aperture />
+                </button>
+                <button
+                  type="button"
+                  className={`call-control ${moreOpen ? 'active' : ''}`}
+                  aria-label="More options"
+                  title="More"
+                  onClick={() => setMoreOpen((v) => !v)}
+                >
+                  <MoreHorizontal />
                 </button>
               </>
             )}
             <button type="button" className="call-control hangup" aria-label="End call" title="End call" disabled={busy} onClick={() => void runAction(onEnd)}>
               <PhoneOff />
             </button>
+          </div>
+        )}
+
+        {moreOpen && video && live && (
+          <div className="call-more-menu" role="menu">
+            <button type="button" role="menuitem" onClick={() => { void switchCamera(); setMoreOpen(false); }} disabled={!localVideo.current}>
+              <SwitchCamera size={16} /> Switch camera
+            </button>
+            <Link href="/store" role="menuitem" onClick={() => setMoreOpen(false)}>
+              <Coins size={16} /> Buy coins
+            </Link>
           </div>
         )}
 

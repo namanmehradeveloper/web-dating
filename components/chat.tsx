@@ -1499,16 +1499,23 @@ export function Chat({ go }: { go: (p: string) => void }) {
           </div>
         </Modal>
       )}
-      {activeCall && (
-        <CallOverlay
-          activeCall={activeCall}
-          peerName={conversations.find((item) => item.id === activeCall.call.conversationId)?.otherUser.displayName || 'Dating Cloud member'}
-          onAccept={acceptCall}
-          onReject={rejectCall}
-          onCancel={cancelCall}
-          onEnd={endCall}
-        />
-      )}
+      {activeCall && (() => {
+        const peer = conversations.find((item) => item.id === activeCall.call.conversationId)?.otherUser;
+        const peerPhoto = peer?.photos?.[0]?.url ? mediaUrl(peer.photos[0].url) : undefined;
+        return (
+          <CallOverlay
+            activeCall={activeCall}
+            peerName={peer?.displayName || 'Dating Cloud member'}
+            peerPhotoUrl={peerPhoto}
+            currentUserId={session?.userId}
+            socket={socketRef.current}
+            onAccept={acceptCall}
+            onReject={rejectCall}
+            onCancel={cancelCall}
+            onEnd={endCall}
+          />
+        );
+      })()}
     </div>
   );
 }
