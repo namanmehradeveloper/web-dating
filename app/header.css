@@ -150,6 +150,11 @@ body.dc-msg-route .dc-header-messages .dc-header-inner {
   display: none;
 }
 
+/* Nav shortcuts in account menu — only when top nav is collapsed */
+.dc-account-mobile-nav {
+  display: none;
+}
+
 /* —— Actions —— */
 .dc-header-actions {
   display: flex;
@@ -462,6 +467,23 @@ body.dc-msg-route .dc-header-messages .dc-header-inner {
 
   .dc-menu-toggle {
     display: grid;
+  }
+
+  /* Logged-in: same as desktop — avatar only, no hamburger */
+  .dc-header:has(.dc-account) .dc-menu-toggle {
+    display: none !important;
+  }
+
+  .dc-account-mobile-nav {
+    display: flex;
+  }
+
+  .dc-menu-divider.dc-account-mobile-nav {
+    display: block;
+  }
+
+  .dc-account-desktop-only {
+    display: none;
   }
 
   .dc-nav.open {

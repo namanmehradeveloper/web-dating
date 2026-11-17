@@ -7,7 +7,7 @@ import type { Socket } from 'socket.io-client';
 import { Lottie } from 'lottie-react';
 import {
   Camera, CameraOff, Gift, Mic, MicOff, MoreHorizontal, Phone, PhoneOff,
-  Plus, Sparkles, SwitchCamera, X, Aperture, Coins,
+  Plus, Sparkles, SwitchCamera, X, Coins,
 } from 'lucide-react';
 import { ApiFailure, mediaUrl, messageOf, request } from '@/lib/api';
 import type { StoreItem, StoreWallet } from '@/lib/types';
@@ -281,45 +281,59 @@ export function CallOverlay({
     credentials?.uid,
   ]);
 
-  // Apply CSS beauty filters to local Agora video element + optional MediaPipe blur.
+  // CSS filters via custom property so Agora video remounts keep the look.
   useEffect(() => {
-    if (!video || !live || !mediaReady) return;
     const root = localPreview.current;
     if (!root) return;
-    const videoEl = root.querySelector('video') as HTMLVideoElement | null;
-    if (!videoEl) return;
-    videoEl.style.filter = beauty.preset === 'blur' ? 'none' : beautyCss;
-    videoEl.style.transition = 'filter .2s ease';
+    root.style.setProperty('--beauty-filter', beauty.preset === 'blur' ? 'none' : beautyCss);
+  }, [beauty.preset, beautyCss]);
 
-    const wantsBlur = beauty.preset === 'blur';
-    if (!wantsBlur) {
+  // MediaPipe background blur — only (re)start when blur preset toggles / media is ready.
+  useEffect(() => {
+    if (!video || !live || !mediaReady || beauty.preset !== 'blur') {
       blurEngineRef.current?.stop();
       blurEngineRef.current = null;
       setBlurActive(false);
       return;
     }
 
+    const root = localPreview.current;
     const canvas = blurCanvasRef.current;
-    if (!canvas) return;
-    blurEngineRef.current?.stop();
-    const engine = new BackgroundBlurEngine(videoEl, canvas, beauty.blurAmount);
+    const videoEl = root?.querySelector('video') as HTMLVideoElement | null;
+    if (!root || !canvas || !videoEl) return;
+
+    let cancelled = false;
+    const engine = new BackgroundBlurEngine(videoEl, canvas);
     engine.setBlurAmount(beauty.blurAmount);
     blurEngineRef.current = engine;
-    setBlurActive(true);
-    void engine.start().catch((error) => {
-      setRtcError(error instanceof Error ? error.message : 'Background blur failed to start.');
-      setBlurActive(false);
-    });
+
+    void engine.start()
+      .then(() => {
+        if (!cancelled) {
+          engine.setBlurAmount(beauty.blurAmount);
+          setBlurActive(true);
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setBlurActive(false);
+        setRtcError(error instanceof Error ? error.message : 'Background blur failed to start.');
+      });
 
     return () => {
+      cancelled = true;
       engine.stop();
       if (blurEngineRef.current === engine) blurEngineRef.current = null;
+      setBlurActive(false);
     };
-  }, [beauty, beautyCss, video, live, mediaReady]);
+    // blurAmount is applied live via setBlurAmount — do not restart MediaPipe on slider moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beauty.preset, video, live, mediaReady]);
 
   useEffect(() => {
+    if (beauty.preset !== 'blur') return;
     blurEngineRef.current?.setBlurAmount(beauty.blurAmount);
-  }, [beauty.blurAmount]);
+  }, [beauty.blurAmount, beauty.preset]);
 
   const toggleMute = async () => {
     const track = localAudio.current;
@@ -359,28 +373,6 @@ export function CallOverlay({
       setRtcError('');
     } catch (error) {
       setRtcError(error instanceof Error ? error.message : 'Unable to switch camera.');
-    }
-  };
-
-  const captureScreenshot = () => {
-    const remoteVideo = remotePreview.current?.querySelector('video') as HTMLVideoElement | null;
-    if (!remoteVideo) {
-      setRtcError('No video frame available to capture.');
-      return;
-    }
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = remoteVideo.videoWidth || 1280;
-      canvas.height = remoteVideo.videoHeight || 720;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(remoteVideo, 0, 0, canvas.width, canvas.height);
-      const link = document.createElement('a');
-      link.download = `dating-cloud-call-${Date.now()}.jpg`;
-      link.href = canvas.toDataURL('image/jpeg', 0.92);
-      link.click();
-    } catch (error) {
-      setRtcError(error instanceof Error ? error.message : 'Unable to capture screenshot.');
     }
   };
 
@@ -642,9 +634,6 @@ export function CallOverlay({
                   onClick={() => { setGiftsOpen((v) => !v); setBeautyOpen(false); void refreshStore(); }}
                 >
                   <Gift />
-                </button>
-                <button type="button" className="call-control" aria-label="Take screenshot" title="Screenshot" onClick={captureScreenshot}>
-                  <Aperture />
                 </button>
                 <button
                   type="button"

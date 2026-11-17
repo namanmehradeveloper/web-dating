@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import {
   Heart, Menu, X, ArrowRight, LogOut, ShieldCheck, Bell, User,
-  Settings, Info, CreditCard, MessagesSquare, Zap,
+  Settings, Info, CreditCard, MessagesSquare, Zap, Compass, MessageCircle, Store,
 } from 'lucide-react';
 import { useApp } from './provider';
 import { Avatar } from './ui';
@@ -93,7 +93,7 @@ export function SiteHeader() {
     };
   }, [session, pathname]);
 
-  // Mobile menu keyboard and resize listeners
+  // Mobile menu keyboard and resize listeners (guests only)
   useEffect(() => {
     if (!open) return;
     const previous = document.body.style.overflow;
@@ -144,34 +144,8 @@ export function SiteHeader() {
             );
           })}
 
-          {/* Mobile-only Extra Links */}
-          {session ? (
-            <>
-              <Link className="dc-mobile-extra" href="/profile" onClick={() => setOpen(false)}>
-                My profile
-              </Link>
-              <Link className="dc-mobile-extra" href="/notifications" onClick={() => setOpen(false)}>
-                Notifications{unreadNotifs > 0 ? ` (${unreadNotifs})` : ''}
-              </Link>
-              <Link className="dc-mobile-extra" href="/account" onClick={() => setOpen(false)}>
-                Account
-              </Link>
-              <Link className="dc-mobile-extra" href="/help" onClick={() => setOpen(false)}>
-                Help
-              </Link>
-              <button
-                type="button"
-                className="dc-mobile-extra"
-                onClick={() => {
-                  setOpen(false);
-                  void signOut();
-                  router.push('/');
-                }}
-              >
-                Log out
-              </button>
-            </>
-          ) : (
+          {/* Mobile-only Extra Links (guest hamburger menu) */}
+          {!session && (
             <>
               <Link className="dc-mobile-extra" href="/login" onClick={() => setOpen(false)}>
                 Login
@@ -192,7 +166,7 @@ export function SiteHeader() {
                 {unreadNotifs > 0 && <span className="dc-notif-dot" />}
               </Link>
 
-              {/* User Account Dropdown */}
+              {/* User Account Dropdown — same on desktop & mobile */}
               <div className="dc-account" ref={accountRef}>
                 <button
                   type="button"
@@ -208,11 +182,29 @@ export function SiteHeader() {
 
                 {account && (
                   <div className="dc-account-menu" role="menu">
+                    <Link className="dc-account-mobile-nav" href="/discover" role="menuitem" onClick={() => setAccount(false)}>
+                      <Compass size={18} strokeWidth={1.7} />
+                      <span>Discover</span>
+                    </Link>
+                    <Link className="dc-account-mobile-nav" href="/matches" role="menuitem" onClick={() => setAccount(false)}>
+                      <MessagesSquare size={18} strokeWidth={1.7} />
+                      <span>Matches</span>
+                    </Link>
+                    <Link className="dc-account-mobile-nav" href="/messages" role="menuitem" onClick={() => setAccount(false)}>
+                      <MessageCircle size={18} strokeWidth={1.7} />
+                      <span>Messages</span>
+                    </Link>
+                    <Link className="dc-account-mobile-nav" href="/store" role="menuitem" onClick={() => setAccount(false)}>
+                      <Store size={18} strokeWidth={1.7} />
+                      <span>Store</span>
+                    </Link>
+                    <div className="dc-menu-divider dc-account-mobile-nav" />
+
                     <Link href="/profile" role="menuitem" onClick={() => setAccount(false)}>
                       <User size={18} strokeWidth={1.7} />
                       <span>Profile</span>
                     </Link>
-                    <Link href="/matches" role="menuitem" onClick={() => setAccount(false)}>
+                    <Link className="dc-account-desktop-only" href="/matches" role="menuitem" onClick={() => setAccount(false)}>
                       <MessagesSquare size={18} strokeWidth={1.7} />
                       <span>Community</span>
                     </Link>
@@ -265,18 +257,20 @@ export function SiteHeader() {
           )}
         </div>
 
-        {/* Mobile Navigation Toggle Button */}
-        <button
-          ref={menuButton}
-          type="button"
-          aria-controls="main-navigation"
-          className="dc-menu-toggle"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          aria-label={open ? 'Close menu' : 'Open menu'}
-        >
-          {open ? <X size={20} /> : <Menu size={20} />}
-        </button>
+        {/* Guest-only mobile nav toggle — logged-in users use avatar like desktop */}
+        {!session && (
+          <button
+            ref={menuButton}
+            type="button"
+            aria-controls="main-navigation"
+            className="dc-menu-toggle"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-label={open ? 'Close menu' : 'Open menu'}
+          >
+            {open ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        )}
       </div>
     </header>
   );
