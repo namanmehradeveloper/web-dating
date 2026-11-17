@@ -9,10 +9,11 @@
     "lint": "tsc --noEmit",
     "test:smoke": "node scripts/smoke-test.cjs",
     "test:routes": "node scripts/route-audit.cjs",
-    "test": "npm run test:smoke && npm run test:routes"
+    "test:video-quality": "node scripts/call-video-quality-test.cjs",
+    "test": "npm run test:smoke && npm run test:routes && npm run test:video-quality"
   },
   "dependencies": {
-    "agora-rtc-sdk-ng": "^4.23.4",
+    "agora-rtc-sdk-ng": "4.24.9",
     "axios": "^1.21.0",
     "lottie-react": "^3.1.2",
     "lucide-react": "^0.468.0",

@@ -15,6 +15,15 @@ import {
   BEAUTY_PRESETS, BackgroundBlurEngine, DEFAULT_BEAUTY, buildBeautyCssFilter,
   type BeautyPresetId, type BeautyState,
 } from '@/lib/call-beauty';
+import {
+  LOCAL_PLAY_CONFIG,
+  REMOTE_PLAY_CONFIG,
+  createHdCameraTrack,
+  enableDualStreamForCall,
+  startAdaptiveVideoQuality,
+  type AdaptiveController,
+  type VideoStatsSnapshot,
+} from '@/lib/call-video-quality';
 import { GIFT_BURST_LOTTIE, type CallGiftEvent } from '@/lib/gift-lottie';
 
 export type CallInfo = {
@@ -84,10 +93,12 @@ export function CallOverlay({
   const clientRef = useRef<AgoraClient | null>(null);
   const localAudio = useRef<AudioTrack | null>(null);
   const localVideo = useRef<VideoTrack | null>(null);
+  const qualityCtrlRef = useRef<AdaptiveController | null>(null);
   const [muted, setMuted] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [mediaReady, setMediaReady] = useState(false);
   const [rtcError, setRtcError] = useState('');
+  const [videoStats, setVideoStats] = useState<VideoStatsSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [beautyOpen, setBeautyOpen] = useState(false);
@@ -114,6 +125,7 @@ export function CallOverlay({
     setCameraEnabled(true);
     setMediaReady(false);
     setRtcError('');
+    setVideoStats(null);
     setBeautyOpen(false);
     setGiftsOpen(false);
     setMoreOpen(false);
@@ -198,25 +210,46 @@ export function CallOverlay({
       try {
         const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
         if (disposed) return;
+        // VP8 keeps 1080p viable on more browsers (incl. mobile) vs H.264 Baseline limits.
         client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
         clientRef.current = client;
+
+        if (call.type === 'VIDEO') {
+          await enableDualStreamForCall(client);
+        }
+
         client.on('user-published', async (user, mediaType) => {
           if (!client) return;
           await client.subscribe(user, mediaType);
           if (disposed) return;
           if (mediaType === 'video' && user.videoTrack && remotePreview.current) {
-            user.videoTrack.play(remotePreview.current, { fit: 'contain' });
+            user.videoTrack.play(remotePreview.current, REMOTE_PLAY_CONFIG);
+            qualityCtrlRef.current?.setRemoteUid(user.uid);
           }
-          if (mediaType === 'audio') user.audioTrack?.play();
+          if (mediaType === 'audio') {
+            // Play audio without extra buffering so A/V stay aligned with video frames.
+            user.audioTrack?.play();
+          }
         });
-        client.on('user-left', () => setRtcError('The other person disconnected.'));
+        client.on('user-unpublished', (user, mediaType) => {
+          if (mediaType === 'video') qualityCtrlRef.current?.setRemoteUid(null);
+          void user;
+        });
+        client.on('user-left', () => {
+          qualityCtrlRef.current?.setRemoteUid(null);
+          setRtcError('The other person disconnected.');
+        });
 
         await client.join(credentials.appId, credentials.channelName, credentials.token, credentials.uid);
         if (disposed) {
           await client.leave();
           return;
         }
-        audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+        audioTrack = await AgoraRTC.createMicrophoneAudioTrack({
+          AEC: true,
+          ANS: true,
+          AGC: true,
+        });
         if (disposed) {
           audioTrack.stop();
           audioTrack.close();
@@ -225,8 +258,10 @@ export function CallOverlay({
         }
         localAudio.current = audioTrack;
         const tracks: Array<AudioTrack | VideoTrack> = [audioTrack];
+        let hdMeta: Awaited<ReturnType<typeof createHdCameraTrack>> | null = null;
         if (call.type === 'VIDEO') {
-          videoTrack = await AgoraRTC.createCameraVideoTrack();
+          hdMeta = await createHdCameraTrack((config) => AgoraRTC.createCameraVideoTrack(config));
+          videoTrack = hdMeta.track;
           if (disposed) {
             audioTrack.stop();
             audioTrack.close();
@@ -237,9 +272,6 @@ export function CallOverlay({
           }
           localVideo.current = videoTrack;
           tracks.push(videoTrack);
-          if (localPreview.current) {
-            videoTrack.play(localPreview.current, { fit: 'contain', mirror: true });
-          }
         }
         await client.publish(tracks);
         if (disposed) {
@@ -249,6 +281,29 @@ export function CallOverlay({
           videoTrack?.close();
           await client.leave();
         } else {
+          // Bind local preview after publish. Do not call track.stop() — that shuts the camera.
+          if (call.type === 'VIDEO' && videoTrack && localPreview.current) {
+            videoTrack.play(localPreview.current, LOCAL_PLAY_CONFIG);
+          }
+          if (call.type === 'VIDEO' && videoTrack && client && hdMeta) {
+            qualityCtrlRef.current?.stop();
+            qualityCtrlRef.current = startAdaptiveVideoQuality({
+              client,
+              localVideo: videoTrack,
+              initialPreset: hdMeta.preset,
+              canUse1080: hdMeta.canUse1080,
+              callbacks: {
+                onStats: (stats) => {
+                  if (!disposed) setVideoStats(stats);
+                },
+                onTierChange: () => {
+                  // Re-play only (no stop) so encoder swaps keep the local mirror visible.
+                  if (disposed || !localPreview.current || !localVideo.current) return;
+                  localVideo.current.play(localPreview.current, LOCAL_PLAY_CONFIG);
+                },
+              },
+            });
+          }
           setMediaReady(true);
         }
       } catch (error) {
@@ -259,6 +314,8 @@ export function CallOverlay({
     void join();
     return () => {
       disposed = true;
+      qualityCtrlRef.current?.stop();
+      qualityCtrlRef.current = null;
       blurEngineRef.current?.stop();
       blurEngineRef.current = null;
       client?.removeAllListeners();
@@ -280,6 +337,17 @@ export function CallOverlay({
     credentials?.token,
     credentials?.uid,
   ]);
+
+  // If the local <video> player is missing after connect, re-bind (never call track.stop()).
+  useEffect(() => {
+    if (!mediaReady || !video || !live) return;
+    const track = localVideo.current;
+    const root = localPreview.current;
+    if (!track || !root) return;
+    if (!root.querySelector('video')) {
+      track.play(root, LOCAL_PLAY_CONFIG);
+    }
+  }, [mediaReady, video, live]);
 
   // CSS filters via custom property so Agora video remounts keep the look.
   useEffect(() => {
@@ -460,6 +528,29 @@ export function CallOverlay({
                   <span><i className="call-live-dot" /> Live · {formatDuration(elapsed)}</span>
                 </div>
               </div>
+              {videoStats && (
+                <div
+                  className={`call-quality-chip${videoStats.verified ? ' verified' : ''}`}
+                  title={videoStats.note}
+                  aria-label={`Video quality ${videoStats.note}`}
+                >
+                  <strong>
+                    {videoStats.verified
+                      ? `${
+                        videoStats.sendHeight >= 1000 ? '1080p'
+                          : videoStats.sendHeight >= 700 ? '720p'
+                            : videoStats.sendHeight >= 450 ? '480p'
+                              : `${videoStats.sendHeight}p`
+                      }${videoStats.sendFps >= 50 ? '60' : ''}`
+                      : videoStats.tierLabel}
+                  </strong>
+                  <span>
+                    {videoStats.verified
+                      ? `${videoStats.sendWidth}×${videoStats.sendHeight} · ${videoStats.sendFps || '–'}fps`
+                      : 'measuring…'}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="call-topbar-right">
               <div className="call-coin-chip" title="Coin balance">

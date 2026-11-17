@@ -174,6 +174,11 @@ a{color:var(--land-red)}
 .call-peer-pill strong{display:block;font-size:13px;line-height:1.15}
 .call-peer-pill span{display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(230,224,240,.82)}
 .call-live-dot{width:7px;height:7px;border-radius:50%;background:#29d17a;box-shadow:0 0 0 3px rgba(41,209,122,.18);display:inline-block}
+.call-quality-chip{display:flex;flex-direction:column;gap:1px;padding:7px 12px;border-radius:14px;border:1px solid rgba(120,220,180,.28);background:rgba(12,28,22,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:rgba(210,255,230,.9);max-width:min(220px,42vw)}
+.call-quality-chip strong{font-size:11px;letter-spacing:.4px;color:#9dffc8}
+.call-quality-chip span{font-size:10px;color:rgba(210,255,230,.78);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.call-quality-chip.verified{border-color:rgba(80,230,160,.45)}
+/* Do not set transform/backface on video — it overrides Agora mirror and can black out local preview. */
 .call-coin-chip{display:flex;align-items:center;gap:7px;padding:7px 8px 7px 11px;border-radius:999px;border:1px solid rgba(255,210,120,.28);background:rgba(28,20,12,.55);backdrop-filter:blur(16px);color:#ffe2a8}
 .call-coin-chip strong{font-size:13px;color:#fff}
 .call-coin-add{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:linear-gradient(160deg,#ff6b8f,#e83d6a);color:#fff}
@@ -237,6 +242,9 @@ a{color:var(--land-red)}
 @media(max-width:900px){
   .call-local-video{width:clamp(100px,22vw,150px);border-radius:16px}
   .call-brand{display:none}
+  .call-quality-chip{max-width:min(160px,38vw);padding:6px 10px}
+  .call-quality-chip strong{font-size:10px}
+  .call-quality-chip span{font-size:9px}
   .call-beauty-panel{left:max(12px,env(safe-area-inset-left));top:auto;bottom:max(110px,env(safe-area-inset-bottom));transform:none;width:min(320px,calc(100vw - 24px))}
   .call-side-rail{top:auto;bottom:max(110px,env(safe-area-inset-bottom));transform:none}
   .video-call .call-control,.call-panel-video .call-control{width:46px;height:46px}
