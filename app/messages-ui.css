@@ -9,7 +9,7 @@ body.dc-msg-route .dc-header-messages .dc-header-inner{
   height:72px;
 }
 body.dc-msg-route .dc-header-messages .dc-logo-name{font-size:22px}
-body.dc-msg-route .dc-header-messages .dc-logo-mark{width:34px;height:36px}
+body.dc-msg-route .dc-header-messages .dc-logo-mark{width:34px;height:34px;border-radius:9px}
 
 .dc-member.dc-messages.dc-member-messages{
   max-width:none;

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import {
-  Heart, Menu, X, ArrowRight, LogOut, ShieldCheck, Bell, User,
+  Menu, X, ArrowRight, LogOut, ShieldCheck, Bell, User,
   Settings, Info, CreditCard, MessagesSquare, Zap, Compass, MessageCircle, Store,
 } from 'lucide-react';
 import { useApp } from './provider';
@@ -31,11 +31,10 @@ export function Logo({ inverse = false }: { inverse?: boolean }) {
   return (
     <Link className={`dc-logo ${inverse ? 'inverse' : ''}`} href="/" aria-label="Dating Cloud home">
       <span className="dc-logo-mark">
-        <Heart fill="currentColor" size={20} />
+        <img src="/favicon.png" alt="" width={40} height={40} decoding="async" />
       </span>
       <span className="dc-logo-name">
         Dating<span>Cloud</span>
-        <small>CONNECTIONS THAT MATTER</small>
       </span>
     </Link>
   );

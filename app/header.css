@@ -43,32 +43,46 @@ body.dc-msg-route .dc-header-messages .dc-header-inner {
 }
 
 .dc-logo-mark {
-  width: 38px;
+  width: 40px;
   height: 40px;
-  border-radius: 50% 50% 45% 45%;
-  background: var(--v5-plum, #3e2942);
+  border-radius: 11px;
+  background: transparent;
   color: #f7d8e3;
   display: grid;
   place-items: center;
-  box-shadow: none;
-  transform: rotate(-7deg);
+  box-shadow: 0 4px 14px rgba(62, 41, 66, 0.12);
+  transform: none;
+  overflow: hidden;
+  flex: none;
+}
+
+.dc-logo-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .dc-logo-mark svg {
-  transform: rotate(7deg);
+  transform: none;
   width: 19px;
   color: #f7d8e3;
 }
 
 .dc-logo-name {
-  display: flex;
-  flex-direction: column;
+  display: inline;
   font-family: var(--v5-serif, Georgia, 'Times New Roman', serif);
   font-size: 24px;
   font-weight: 600;
   letter-spacing: -1px;
   color: var(--v5-plum, #3e2942);
   line-height: 1.1;
+  filter: none;
+  text-shadow: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+  white-space: nowrap;
 }
 
 .dc-logo-name > span {
@@ -77,37 +91,62 @@ body.dc-msg-route .dc-header-messages .dc-header-inner {
 }
 
 .dc-logo-name small {
-  font-family: inherit;
-  font-size: 6px;
-  font-weight: 400;
-  letter-spacing: 1.6px;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 1.2px;
   color: #827080;
-  margin-top: 5px;
+  margin-top: 4px;
+  line-height: 1.2;
+  text-transform: uppercase;
 }
 
 .dc-logo.inverse {
-  color: #fff6ee;
+  color: #fff;
 }
 
 .dc-logo.inverse .dc-logo-name {
-  color: #fff6ee;
+  color: #fff;
+  filter: none;
+  text-shadow: none;
 }
 
 .dc-logo.inverse .dc-logo-name > span {
-  color: #e3b5c9;
+  color: #f0c4d4;
 }
 
 .dc-logo.inverse .dc-logo-name small {
-  color: #bdabbe;
+  color: #d5c4cd;
 }
 
 .dc-logo.inverse .dc-logo-mark {
-  background: #f7e9dc;
+  background: transparent;
   color: var(--v5-plum, #3e2942);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
 }
 
 .dc-logo.inverse .dc-logo-mark svg {
   color: var(--v5-plum, #3e2942);
+}
+
+/* Footer brand: keep wordmark crisp on dark background */
+.dc-footer .dc-logo,
+.dc-footer .dc-logo-name,
+.dc-footer .dc-logo-name small {
+  filter: none !important;
+  text-shadow: none !important;
+  opacity: 1;
+  transform: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.dc-footer .dc-logo-name {
+  color: #ffffff;
+}
+
+.dc-footer .dc-logo-name > span {
+  color: #b0b0b0;
 }
 
 /* —— Navigation —— */
@@ -554,11 +593,12 @@ body.dc-msg-route .dc-header-messages .dc-header-inner {
 
   .dc-logo-mark {
     width: 34px;
-    height: 36px;
+    height: 34px;
+    border-radius: 9px;
   }
 
   .dc-logo-name small {
-    display: none;
+    font-size: 8px;
   }
 
   .dc-share-pill {

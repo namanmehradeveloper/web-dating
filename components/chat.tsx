@@ -1310,7 +1310,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
                       value={text}
                       maxLength={1000}
                       rows={1}
-                      placeholder={pendingAttachment ? "Add a caption... (Enter to send)" : "Type a message... (Enter to send, Shift+Enter for new line)"}
+                      placeholder={pendingAttachment ? "Add a caption... (Enter to send)" : "Type a message"}
                       onCompositionStart={() => { composingRef.current = true; }}
                       onCompositionEnd={() => { composingRef.current = false; }}
                       onBlur={() => {
