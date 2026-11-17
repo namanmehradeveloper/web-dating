@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import {
-  Heart, Menu, X, ArrowRight, ChevronDown, LogOut, ShieldCheck,
-  Crown, Bell, User, Settings, HelpCircle,
+  Heart, Menu, X, ArrowRight, LogOut, ShieldCheck, Bell, User,
+  Settings, Info, CreditCard, MessagesSquare, Zap,
 } from 'lucide-react';
 import { useApp } from './provider';
 import { Avatar } from './ui';
@@ -187,9 +187,9 @@ export function SiteHeader() {
         <div className="dc-header-actions">
           {session ? (
             <>
-              <Link href="/premium" className="dc-plus" title="Explore Plus Membership">
-                <Crown size={14} />
-                <span>Plus</span>
+              <Link href="/notifications" className="dc-header-icon" title="Notifications" aria-label="Notifications">
+                <Bell size={18} strokeWidth={1.8} />
+                {unreadNotifs > 0 && <span className="dc-notif-dot" />}
               </Link>
 
               {/* User Account Dropdown */}
@@ -202,36 +202,39 @@ export function SiteHeader() {
                   aria-expanded={account}
                   title="Account menu"
                 >
-                  <div className="dc-account-avatar-wrap">
-                    <Avatar user={me} size={32} />
-                    {unreadNotifs > 0 && <span className="dc-notif-dot-mini" />}
-                  </div>
-                  <span>{me?.displayName || 'Account'}</span>
-                  <ChevronDown size={14} />
+                  <span className="dc-account-ring" aria-hidden />
+                  <Avatar user={me} size={36} />
                 </button>
 
                 {account && (
                   <div className="dc-account-menu" role="menu">
                     <Link href="/profile" role="menuitem" onClick={() => setAccount(false)}>
-                      <User size={15} />
+                      <User size={18} strokeWidth={1.7} />
                       <span>Profile</span>
                     </Link>
-                    <Link href="/notifications" role="menuitem" onClick={() => setAccount(false)}>
-                      <Bell size={15} />
-                      <span>Notifications</span>
-                      {unreadNotifs > 0 && <span className="dc-menu-badge">{unreadNotifs}</span>}
+                    <Link href="/matches" role="menuitem" onClick={() => setAccount(false)}>
+                      <MessagesSquare size={18} strokeWidth={1.7} />
+                      <span>Community</span>
+                    </Link>
+                    <Link href="/premium" role="menuitem" onClick={() => setAccount(false)}>
+                      <CreditCard size={18} strokeWidth={1.7} />
+                      <span>Subscription</span>
+                      <span className="dc-menu-pro">
+                        <Zap size={11} fill="currentColor" />
+                        PRO
+                      </span>
                     </Link>
                     <Link href="/account" role="menuitem" onClick={() => setAccount(false)}>
-                      <Settings size={15} />
+                      <Settings size={18} strokeWidth={1.7} />
                       <span>Settings</span>
-                    </Link>
-                    <Link href="/help" role="menuitem" onClick={() => setAccount(false)}>
-                      <HelpCircle size={15} />
-                      <span>Help</span>
                     </Link>
 
                     <div className="dc-menu-divider" />
 
+                    <Link href="/help" role="menuitem" onClick={() => setAccount(false)}>
+                      <Info size={18} strokeWidth={1.7} />
+                      <span>Help center</span>
+                    </Link>
                     <button
                       type="button"
                       className="dc-menu-logout"
@@ -242,8 +245,8 @@ export function SiteHeader() {
                         router.push('/');
                       }}
                     >
-                      <LogOut size={15} />
-                      <span>Log out</span>
+                      <LogOut size={18} strokeWidth={1.7} />
+                      <span>Sign out</span>
                     </button>
                   </div>
                 )}
