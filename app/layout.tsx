@@ -1,4 +1,5 @@
-import type {Metadata} from 'next';import './globals.css';import './unified.css';import './premium-v2.css';import './design-v5.css';import './messages-ui.css';import './login-activity.css';import './member-detail.css';import './header.css';import {AppProvider} from '@/components/provider';import {SiteHeader,SiteFooter} from '@/components/site-chrome';import {MotionEffects} from '@/components/motion-effects';
+import type {Metadata} from 'next';import './globals.css';import './unified.css';import './premium-v2.css';import './design-v5.css';import './messages-ui.css';import './login-activity.css';
+import './account-settings.css';import './member-detail.css';import './header.css';import {AppProvider} from '@/components/provider';import {SiteHeader,SiteFooter} from '@/components/site-chrome';import {MotionEffects} from '@/components/motion-effects';
 export const metadata:Metadata={
   title:{default:'Dating Cloud | Meaningful connections',template:'%s | Dating Cloud'},
   description:'Discover, match and start meaningful conversations with Dating Cloud. Adults 18+.',

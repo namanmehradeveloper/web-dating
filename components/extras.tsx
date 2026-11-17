@@ -1,11 +1,11 @@
 'use client';
 import { useEffect,useState } from 'react';
 import Link from 'next/link';
-import { Bell, BellRing, Crown, HelpCircle, LifeBuoy, Settings, ShieldCheck, Ban, LogOut, Database, AlertTriangle, Shield, Server, ChevronRight, CreditCard, Check, Clock, MapPin, Monitor } from 'lucide-react';
+import { BellRing, Crown, ShieldCheck, Ban, LogOut, AlertTriangle, Shield, ChevronRight, MapPin, Monitor, UserRound, Database, LifeBuoy, Mail, Phone } from 'lucide-react';
 import { useApp } from './provider';
-import { request,mediaUrl,messageOf } from '@/lib/api';
+import { request,messageOf } from '@/lib/api';
 import type {Notification,Product,Entitlement,Member,Ticket} from '@/lib/types';
-import { Button,Panel,Loading,Empty,Badge,Failure } from './ui';
+import { Avatar,Button,Panel,Loading,Empty,Badge,Failure } from './ui';
 function useGet<T>(path:string) {const [data,setData]=useState<T|null>(null);const [loading,setLoading]=useState(true);const[error,setError]=useState('');const refresh=async()=>{setLoading(true);setError('');try{setData(await request<T>('GET',path))}catch(e){setError(messageOf(e))}finally{setLoading(false)}};useEffect(()=>{void refresh()},[path]);return {data,loading,error,refresh}}
 export function Notifications(){const {notify}=useApp();const {data,loading,error,refresh}=useGet<{items:Notification[]}>('/notifications?limit=50');const prefs=useGet<Record<string,boolean>>('/notification-preferences');
  const change=async(key:string,v:boolean)=>{try{await request('PATCH','/notification-preferences',{body:{[key]:v}});void prefs.refresh()}catch(e){notify(messageOf(e))}};
@@ -84,16 +84,179 @@ type LoginActivityPage={items:LoginActivityEntry[];nextCursor?:string|null};
 export function LoginActivity(){const [items,setItems]=useState<LoginActivityEntry[]>([]);const[cursor,setCursor]=useState<string|null>(null);const[loading,setLoading]=useState(true);const[loadingMore,setLoadingMore]=useState(false);const[error,setError]=useState('');
  useEffect(()=>{let active=true;setLoading(true);setError('');void request<LoginActivityPage>('GET','/profile/login-activity?limit=20').then(page=>{if(active){setItems(page.items);setCursor(page.nextCursor||null)}}).catch(e=>{if(active)setError(messageOf(e))}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[]);
  const loadMore=async()=>{if(!cursor||loadingMore)return;setLoadingMore(true);setError('');try{const page=await request<LoginActivityPage>('GET',`/profile/login-activity?limit=20&cursor=${encodeURIComponent(cursor)}`);setItems(current=>[...current,...page.items]);setCursor(page.nextCursor||null)}catch(e){setError(messageOf(e))}finally{setLoadingMore(false)}};
- return <div><Heading label="SECURITY" title="Login Activity" description="Review recent sign-ins to your account."/><div className="security-back"><Link href="/account" className="button outline">Back to Settings</Link></div><Panel title="Recent sign-ins" subtitle="Only you can see your login activity. Times are shown in UTC.">{loading?<Loading/>:error&&!items.length?<Failure error={error} retry={()=>{setLoading(true);void request<LoginActivityPage>('GET','/profile/login-activity?limit=20').then(page=>{setItems(page.items);setCursor(page.nextCursor||null);setError('')}).catch(e=>setError(messageOf(e))).finally(()=>setLoading(false))}}/>:items.length?<div className="login-history-list">{items.map(entry=>{const location=[entry.city,entry.state,entry.country].filter(Boolean).join(', ');return <article key={entry.id} className="login-history-entry"><div className="login-history-entry__top"><strong>{new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short',timeZone:'UTC',timeZoneName:'short'}).format(new Date(entry.loginAt))}</strong><span>{entry.ipAddress||'IP unavailable'}</span></div><div className="login-history-entry__details"><span><MapPin size={15}/>{location||'Location unavailable'}</span><span><Monitor size={15}/>{entry.deviceName} · {entry.deviceType.toLowerCase()}</span><span><ShieldCheck size={15}/>{entry.browser} · {entry.operatingSystem}</span></div></article>})}</div>:<Empty title="No login activity yet" detail="Successful sign-ins will appear here."/>}{error&&items.length>0&&<Failure error={error} />}{cursor&&<div className="login-history-more"><Button tone="outline" disabled={loadingMore} onClick={()=>void loadMore()}>{loadingMore?'Loading…':'Load older activity'}</Button></div>}</Panel></div>}
-export function Account(){const {me,session,signOut,notify}=useApp();const blocked=useGet<{items:{user:Member;blockedAt:string}[]}>('/blocks?limit=50');const exported=useGet<{status:string; downloadUrl?:string;expiresAt?:string}>('/account/export-status');const health=useGet<{status:string;database?:string;environment?:string;uptime?:number}>('/health');const[reason,setReason]=useState('');const[feedback,setFeedback]=useState('');const[confirmText,setConfirmText]=useState('');
- const unblock=async(id:string)=>{try{await request('DELETE',`/users/${id}/block`);notify('Member unblocked.');void blocked.refresh()}catch(e){notify(messageOf(e))}};
- const deletion=async()=>{if(confirmText!=='DELETE')return;try{await request('POST','/account/deletion-request',{body:{confirm:true,reason,feedback}});await signOut(true);notify('Your account deletion has been requested.')}catch(e){notify(messageOf(e))}};
- return <div><Heading label="YOUR ACCOUNT" title="Account & settings" description="Privacy, safety, and your account in one place."/>
- <Panel title="Security" subtitle="Review sign-ins and devices associated with your account."><Link href="/account/security" className="button quiet"><ShieldCheck size={16}/> Login Activity</Link></Panel>
- <div className="two-panel"><Panel title="Your account"><div className="detail-rows"><div><span>Name</span><strong>{me?.displayName||'—'}</strong></div><div><span>Phone</span><strong>{me?.phoneNumber||'—'}</strong></div><div><span>Email</span><strong>{me?.email||'—'}</strong></div><div><span>Member ID</span><strong>{session?.userId||'—'}</strong></div></div><div className="setting-actions"><Button tone="outline" onClick={()=>void signOut()}><LogOut size={16}/> Log out</Button><Button tone="outline" onClick={()=>{if(confirm('Sign out everywhere?'))void signOut(true)}}>Sign out of all devices</Button></div></Panel>
- <Panel title="Account protection" subtitle="Manage people you have blocked.">{blocked.loading?<Loading/>:blocked.data?.items?.length?blocked.data.items.map((item,i)=><div key={i} className="setting-row"><strong>{item.user?.displayName||'Member'}</strong><Button tone="outline" onClick={()=>void unblock(item.user.id)}>Unblock</Button></div>):<Empty title="No blocked members" detail="You have not blocked anyone." icon={<Ban/>}/>}</Panel>
- <Panel title="Data & privacy"><div className="detail-rows"><div><span>Export request</span><Badge kind="gray">{exported.data?.status||'Unknown'}</Badge></div><div><span>Download</span>{exported.data?.status==='READY'&&exported.data.downloadUrl?<a href={exported.data.downloadUrl} target="_blank" rel="noreferrer">Download your data</a>:<span className="muted">Not ready</span>}</div></div><p className="muted">To request a copy of your data, contact Help & Support.</p></Panel>
- <Panel title="Service status"><div className="detail-rows"><div><span>API</span><Badge kind={health.data?.status==='ok'?'green':'gray'}>{health.data?.status||health.error||'Unknown'}</Badge></div><div><span>Database</span><strong>{health.data?.database||'Unknown'}</strong></div><div><span>Environment</span><strong>{health.data?.environment||'Unknown'}</strong></div></div></Panel></div>
- <Panel title="Delete your account" subtitle="This is a sensitive, potentially irreversible action."><div className="danger-box"><AlertTriangle size={21}/><p>Submitting this request hides your account and signs you out. Make sure you are ready before continuing.</p></div><div className="form-grid"><label>Reason (optional)<input maxLength={100} value={reason} onChange={e=>setReason(e.target.value)}/></label><label>Type DELETE to confirm<input value={confirmText} onChange={e=>setConfirmText(e.target.value)}/></label><label className="wide">Feedback (optional)<textarea maxLength={1000} value={feedback} onChange={e=>setFeedback(e.target.value)}/></label></div><Button tone="danger" disabled={confirmText!=='DELETE'} onClick={()=>void deletion()}>Request account deletion</Button></Panel></div>
+ return <div><Heading label="SECURITY" title="Login Activity" description="Review recent sign-ins to your account."/><div className="security-back"><Link href="/account" className="button outline">Back to Settings</Link></div><Panel title="Recent sign-ins" subtitle="Only you can see your login activity. Times are shown in UTC.">{loading?<Loading/>:error&&!items.length?<Failure error={error} retry={()=>{setLoading(true);void request<LoginActivityPage>('GET','/profile/login-activity?limit=20').then(page=>{setItems(page.items);setCursor(page.nextCursor||null);setError('')}).catch(e=>setError(messageOf(e))).finally(()=>setLoading(false))}}/>:items.length?<div className="login-history-list">{items.map(entry=>{const location=[entry.city,entry.state,entry.country].filter(Boolean).join(', ');return <article key={entry.id} className="login-history-entry"><div className="login-history-entry__top"><strong>{new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'UTC',timeZoneName:'short'}).format(new Date(entry.loginAt))}</strong><span>{entry.ipAddress||'IP unavailable'}</span></div><div className="login-history-entry__details"><span><MapPin size={15}/>{location||'Location unavailable'}</span><span><Monitor size={15}/>{entry.deviceName} · {entry.deviceType.toLowerCase()}</span><span><ShieldCheck size={15}/>{entry.browser} · {entry.operatingSystem}</span></div></article>})}</div>:<Empty title="No login activity yet" detail="Successful sign-ins will appear here."/>}{error&&items.length>0&&<Failure error={error} />}{cursor&&<div className="login-history-more"><Button tone="outline" disabled={loadingMore} onClick={()=>void loadMore()}>{loadingMore?'Loading…':'Load older activity'}</Button></div>}</Panel></div>}
+export function Account(){
+  const {me,signOut,notify}=useApp();
+  const blocked=useGet<{items:{user:Member;blockedAt:string}[]}>('/blocks?limit=50');
+  const exported=useGet<{status:string; downloadUrl?:string;expiresAt?:string}>('/account/export-status');
+  const[reason,setReason]=useState('');
+  const[feedback,setFeedback]=useState('');
+  const[confirmText,setConfirmText]=useState('');
+  const[showDelete,setShowDelete]=useState(false);
+
+  const unblock=async(id:string)=>{
+    try{
+      await request('DELETE',`/users/${id}/block`);
+      notify('Member unblocked.');
+      void blocked.refresh();
+    }catch(e){notify(messageOf(e))}
+  };
+
+  const deletion=async()=>{
+    if(confirmText!=='DELETE')return;
+    try{
+      await request('POST','/account/deletion-request',{body:{confirm:true,reason,feedback}});
+      await signOut(true);
+      notify('Your account deletion has been requested.');
+    }catch(e){notify(messageOf(e))}
+  };
+
+  const exportReady=exported.data?.status==='READY'&&exported.data.downloadUrl;
+
+  return (
+    <div className="dc-account-page">
+      <Heading label="YOUR ACCOUNT" title="Account & settings" description="Privacy, safety, and session controls in one place."/>
+
+      <section className="dc-account-identity" aria-label="Your profile summary">
+        <div className="dc-account-identity-main">
+          <Avatar user={me} size={72}/>
+          <div className="dc-account-identity-copy">
+            <h2>{me?.displayName||'Your profile'}</h2>
+            <ul>
+              {me?.phoneNumber?<li><Phone size={14}/><span>{me.phoneNumber}</span></li>:null}
+              {me?.email?<li><Mail size={14}/><span>{me.email}</span></li>:null}
+              {!me?.phoneNumber&&!me?.email?<li><span>Add contact details from your profile.</span></li>:null}
+            </ul>
+          </div>
+        </div>
+        <div className="dc-account-identity-actions">
+          <Link href="/profile" className="button outline"><UserRound size={16}/> Edit profile</Link>
+          <Button tone="outline" onClick={()=>void signOut()}><LogOut size={16}/> Log out</Button>
+          <Button tone="quiet" onClick={()=>{if(confirm('Sign out everywhere?'))void signOut(true)}}>Sign out all devices</Button>
+        </div>
+      </section>
+
+      <section className="dc-account-block" aria-labelledby="dc-account-manage">
+        <div className="dc-account-block-head">
+          <h2 id="dc-account-manage">Manage</h2>
+          <p>Security and everyday account shortcuts.</p>
+        </div>
+        <div className="dc-account-rows">
+          <Link href="/account/security" className="dc-account-row">
+            <span className="dc-account-row-icon"><ShieldCheck size={18}/></span>
+            <span className="dc-account-row-copy">
+              <strong>Login activity</strong>
+              <small>Review recent sign-ins and devices</small>
+            </span>
+            <ChevronRight size={18}/>
+          </Link>
+          <Link href="/notifications" className="dc-account-row">
+            <span className="dc-account-row-icon"><BellRing size={18}/></span>
+            <span className="dc-account-row-copy">
+              <strong>Notifications</strong>
+              <small>Alerts and preference controls</small>
+            </span>
+            <ChevronRight size={18}/>
+          </Link>
+          <Link href="/help" className="dc-account-row">
+            <span className="dc-account-row-icon"><LifeBuoy size={18}/></span>
+            <span className="dc-account-row-copy">
+              <strong>Help & support</strong>
+              <small>FAQs and contact support</small>
+            </span>
+            <ChevronRight size={18}/>
+          </Link>
+        </div>
+      </section>
+
+      <section className="dc-account-block" aria-labelledby="dc-account-privacy">
+        <div className="dc-account-block-head">
+          <h2 id="dc-account-privacy">Privacy & safety</h2>
+          <p>Blocked members and your personal data.</p>
+        </div>
+
+        <div className="dc-account-panel">
+          <div className="dc-account-panel-title">
+            <Ban size={17}/>
+            <div>
+              <strong>Blocked members</strong>
+              <p>People you have blocked will not appear in discovery or chat.</p>
+            </div>
+          </div>
+          {blocked.loading?<Loading label="Loading blocked members…"/>:blocked.data?.items?.length?(
+            <div className="dc-account-blocked-list">
+              {blocked.data.items.map((item,i)=>(
+                <div key={item.user?.id||i} className="dc-account-blocked-row">
+                  <div className="dc-account-blocked-person">
+                    <Avatar user={item.user} size={40}/>
+                    <strong>{item.user?.displayName||'Member'}</strong>
+                  </div>
+                  <Button tone="outline" onClick={()=>void unblock(item.user.id)}>Unblock</Button>
+                </div>
+              ))}
+            </div>
+          ):(
+            <p className="dc-account-empty">No blocked members yet.</p>
+          )}
+        </div>
+
+        <div className="dc-account-panel">
+          <div className="dc-account-panel-title">
+            <Database size={17}/>
+            <div>
+              <strong>Data & privacy</strong>
+              <p>Request or download a copy of your account data.</p>
+            </div>
+          </div>
+          <div className="dc-account-data-meta">
+            <div>
+              <span>Export status</span>
+              <Badge kind={exportReady?'green':'gray'}>{exported.data?.status||'NONE'}</Badge>
+            </div>
+            <div>
+              <span>Download</span>
+              {exportReady?(
+                <a href={exported.data!.downloadUrl!} target="_blank" rel="noreferrer">Download your data</a>
+              ):(
+                <em>Not ready</em>
+              )}
+            </div>
+          </div>
+          <p className="dc-account-note">To request a new export, contact Help & Support.</p>
+        </div>
+      </section>
+
+      <section className="dc-account-danger" aria-labelledby="dc-account-delete">
+        <div className="dc-account-danger-head">
+          <div>
+            <h2 id="dc-account-delete">Delete account</h2>
+            <p>This hides your account and signs you out. It cannot be undone from here.</p>
+          </div>
+          {!showDelete?(
+            <Button tone="danger" onClick={()=>setShowDelete(true)}>
+              <AlertTriangle size={16}/> Continue
+            </Button>
+          ):null}
+        </div>
+        {showDelete?(
+          <div className="dc-account-danger-body">
+            <div className="danger-box">
+              <AlertTriangle size={21}/>
+              <p>Submitting this request hides your account and signs you out on all devices. Type DELETE to confirm.</p>
+            </div>
+            <div className="form-grid">
+              <label>Reason (optional)<input maxLength={100} value={reason} onChange={e=>setReason(e.target.value)}/></label>
+              <label>Type DELETE to confirm<input value={confirmText} onChange={e=>setConfirmText(e.target.value)} placeholder="DELETE" autoComplete="off"/></label>
+              <label className="wide">Feedback (optional)<textarea maxLength={1000} value={feedback} onChange={e=>setFeedback(e.target.value)}/></label>
+            </div>
+            <div className="dc-account-danger-actions">
+              <Button tone="outline" onClick={()=>{setShowDelete(false);setConfirmText('');}}>Cancel</Button>
+              <Button tone="danger" disabled={confirmText!=='DELETE'} onClick={()=>void deletion()}>Request account deletion</Button>
+            </div>
+          </div>
+        ):null}
+      </section>
+    </div>
+  );
 }
 export function Heading({label,title,description}: {label:string;title:string;description:string}){return <div className="page-heading"><div><span className="overline purple">{label}</span><h1>{title}<span className="title-dot">.</span></h1><p>{description}</p></div></div>}
