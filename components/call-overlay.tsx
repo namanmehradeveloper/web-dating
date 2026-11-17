@@ -97,7 +97,8 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
           await client.subscribe(user, mediaType);
           if (disposed) return;
           if (mediaType === 'video' && user.videoTrack && remotePreview.current) {
-            user.videoTrack.play(remotePreview.current);
+            // contain keeps faces at natural proportion (avoids cover-crop zoom).
+            user.videoTrack.play(remotePreview.current, { fit: 'contain' });
           }
           if (mediaType === 'audio') user.audioTrack?.play();
         });
@@ -129,7 +130,9 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
           }
           localVideo.current = videoTrack;
           tracks.push(videoTrack);
-          if (localPreview.current) videoTrack.play(localPreview.current);
+          if (localPreview.current) {
+            videoTrack.play(localPreview.current, { fit: 'contain', mirror: true });
+          }
         }
         await client.publish(tracks);
         if (disposed) {
@@ -227,38 +230,40 @@ export function CallOverlay({ activeCall, peerName, onAccept, onReject, onCancel
     <div className={`call-overlay ${video && call.status === 'ACCEPTED' ? 'video-call' : ''}`} role="dialog" aria-modal="true" aria-label={`${video ? 'Video' : 'Audio'} call`}>
       {video && call.status === 'ACCEPTED' && (
         <div className="call-video-stage">
-          <div className="call-remote-video" ref={remotePreview} />
-          <div className="call-local-video" ref={localPreview} />
+          <div className="call-remote-video" ref={remotePreview} aria-label="Remote video" />
+          <div className="call-local-video" ref={localPreview} aria-label="Your video preview" />
           {!mediaReady && <span className="call-media-status">Connecting media…</span>}
         </div>
       )}
-      <div className="call-panel">
+      <div className={`call-panel${video && call.status === 'ACCEPTED' ? ' call-panel-video' : ''}`}>
         {!video && (
           <span className="call-avatar"><Phone size={28} /></span>
         )}
-        <span className="call-eyebrow">{video ? 'VIDEO CALL' : 'AUDIO CALL'}</span>
-        <h2>{peerName || 'Dating Cloud member'}</h2>
-        <p>
-          {incoming ? 'Incoming call' : outgoing ? 'Calling…' : mediaReady ? 'Connected' : call.status === 'ACCEPTED' ? 'Connecting…' : 'Connecting call…'}
-        </p>
+        <div className="call-panel-meta">
+          <span className="call-eyebrow">{video ? 'VIDEO CALL' : 'AUDIO CALL'}</span>
+          <h2>{peerName || 'Dating Cloud member'}</h2>
+          <p>
+            {incoming ? 'Incoming call' : outgoing ? 'Calling…' : mediaReady ? 'Connected' : call.status === 'ACCEPTED' ? 'Connecting…' : 'Connecting call…'}
+          </p>
+        </div>
         {rtcError && <p className="call-error" role="status">{rtcError}</p>}
 
         {call.status === 'ACCEPTED' && (
-          <div className="call-controls">
-            <button type="button" className={`call-control ${muted ? 'active' : ''}`} aria-label={muted ? 'Unmute microphone' : 'Mute microphone'} onClick={() => void toggleMute()} disabled={!localAudio.current}>
+          <div className="call-controls" role="toolbar" aria-label="Call controls">
+            <button type="button" className={`call-control ${muted ? 'active' : ''}`} aria-label={muted ? 'Unmute microphone' : 'Mute microphone'} title={muted ? 'Unmute' : 'Mute'} onClick={() => void toggleMute()} disabled={!localAudio.current}>
               {muted ? <MicOff /> : <Mic />}
             </button>
             {video && (
               <>
-                <button type="button" className={`call-control ${!cameraEnabled ? 'active' : ''}`} aria-label={cameraEnabled ? 'Turn camera off' : 'Turn camera on'} onClick={() => void toggleCamera()} disabled={!localVideo.current}>
+                <button type="button" className={`call-control ${!cameraEnabled ? 'active' : ''}`} aria-label={cameraEnabled ? 'Turn camera off' : 'Turn camera on'} title={cameraEnabled ? 'Camera off' : 'Camera on'} onClick={() => void toggleCamera()} disabled={!localVideo.current}>
                   {cameraEnabled ? <Camera /> : <CameraOff />}
                 </button>
-                <button type="button" className="call-control" aria-label="Switch camera" onClick={() => void switchCamera()} disabled={!localVideo.current}>
+                <button type="button" className="call-control" aria-label="Switch camera" title="Switch camera" onClick={() => void switchCamera()} disabled={!localVideo.current}>
                   <SwitchCamera />
                 </button>
               </>
             )}
-            <button type="button" className="call-control hangup" aria-label="End call" disabled={busy} onClick={() => void runAction(onEnd)}>
+            <button type="button" className="call-control hangup" aria-label="End call" title="End call" disabled={busy} onClick={() => void runAction(onEnd)}>
               <PhoneOff />
             </button>
           </div>
