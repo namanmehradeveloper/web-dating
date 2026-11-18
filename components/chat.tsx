@@ -193,7 +193,7 @@ function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
 export function Chat({ go }: { go: (p: string) => void }) {
   const { session, notify } = useApp();
   const { activeCall, callConnected, startCall: placeCall } = useCall();
-  const { setActiveConversationId, markConversationRead } = useMessages();
+  const { setActiveConversationId, markConversationRead, refreshUnreadFromServer } = useMessages();
   const pathname = usePathname();
   const query = useSearchParams();
   const pathConversation = pathname.match(/^\/messages\/([^/?#]+)/)?.[1] || null;
@@ -241,7 +241,8 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const composingRef = useRef(false);
   const prevMessageCount = useRef(0);
   const notifyRef = useRef(notify);
-  const loadRef = useRef<(showLoader?: boolean) => Promise<void>>(async () => {});
+  const loadRef = useRef<(showLoader?: boolean) => Promise<Conversation[]>>(async () => []);
+  const refreshUnreadRef = useRef(refreshUnreadFromServer);
   const goRef = useRef(go);
   const tokenRef = useRef(session?.accessToken);
   const everConnected = useRef(false);
@@ -284,6 +285,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
 
   useEffect(() => { notifyRef.current = notify; }, [notify]);
   useEffect(() => { goRef.current = go; }, [go]);
+  useEffect(() => { refreshUnreadRef.current = refreshUnreadFromServer; }, [refreshUnreadFromServer]);
   useEffect(() => {
     tokenRef.current = session?.accessToken;
     const socket = socketRef.current;
@@ -364,10 +366,13 @@ export function Chat({ go }: { go: (p: string) => void }) {
     }
     try {
       const d = await request<{ items: Conversation[] }>('GET', '/conversations?limit=50');
-      setConversations(d.items || []);
+      const items = d.items || [];
+      setConversations(items);
       setError('');
+      return items;
     } catch (e) {
       if (showLoader) setError(messageOf(e));
+      return [] as Conversation[];
     } finally {
       if (showLoader) setLoading(false);
     }
@@ -455,7 +460,25 @@ export function Chat({ go }: { go: (p: string) => void }) {
           socket.emit('message:read', { conversationId: message.conversationId, upToMessageId: message.id });
         }
       }
-      void loadRef.current(false);
+      // Reload list so a previously "Delete chat"'d thread reappears without a page refresh.
+      void (async () => {
+        const items = await loadRef.current(false);
+        void refreshUnreadRef.current();
+        if (items.some((conversation) => conversation.id === message.conversationId)) return;
+        // Fallback when list reload raced ahead of the recipient un-hide.
+        try {
+          const summary = await request<Conversation>(
+            'GET',
+            `/conversations/${encodeURIComponent(message.conversationId)}`,
+          );
+          setConversations((latest) => {
+            if (latest.some((conversation) => conversation.id === summary.id)) return latest;
+            return [summary, ...latest];
+          });
+        } catch {
+          /* still hidden for this viewer, or transient error */
+        }
+      })();
     });
     socket.on('message:read', () => {
       const id = selectedRef.current;
@@ -684,6 +707,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
       const conversationId = convo.id;
       await request('DELETE', `/conversations/${encodeURIComponent(conversationId)}`);
       setConversations((current) => current.filter((conversation) => conversation.id !== conversationId));
+      markConversationRead(conversationId);
       setSelected(null);
       setOptions(false);
       go('/messages');

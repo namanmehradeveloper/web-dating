@@ -341,6 +341,9 @@ export function MessageProvider({ children }: { children: ReactNode }) {
       }));
     }
 
+    // Sync badges from the server so a restored (previously deleted) conversation's unread is accurate.
+    void refreshUnreadFromServer();
+
     // Suppress popup/sound when the open thread is already on screen, prefs are off, or we already notified.
     if (viewingThis || alreadyNotified || !messagesPrefEnabledRef.current) return;
 
@@ -377,7 +380,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
           : current
       ));
     }
-  }, [openConversation, playSound, refreshInboxUnread, showToast]);
+  }, [openConversation, playSound, refreshInboxUnread, refreshUnreadFromServer, showToast]);
 
   // Global listener on the shared CallProvider socket (no second Socket.IO client).
   useEffect(() => {

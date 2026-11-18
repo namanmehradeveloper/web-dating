@@ -642,3 +642,80 @@ body.dc-msg-route .dc-header-messages .dc-header-inner {
     max-height: calc(100dvh - 70px);
   }
 }
+
+/* Interior marketing pages: same crisp/bold text as Home (no soft/blur look) */
+.v2-interior,
+.v2-interior h1,
+.v2-interior h2,
+.v2-interior h3,
+.v2-interior p,
+.v2-interior span,
+.v2-interior a,
+.v2-interior button,
+.v2-interior strong,
+.v2-interior small,
+.v2-interior em,
+.v2-interior label,
+.v2-interior summary,
+.v2-interior li {
+  filter: none !important;
+  text-shadow: none !important;
+  -webkit-font-smoothing: auto !important;
+  -moz-osx-font-smoothing: auto !important;
+  text-rendering: optimizeLegibility;
+}
+
+.v2-interior {
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+}
+
+.v2-interior-headline h1,
+.v2-interior .v2-heading,
+.v2-interior h2.v2-heading,
+.v2-stories-feature h2,
+.v2-about-image-band strong,
+.v2-interior-cta h2,
+.v2-about-values-grid article h3,
+.v2-content-card h3 {
+  font-weight: 500 !important;
+  color: var(--v5-plum, #3e2942) !important;
+}
+
+.v2-interior-headline h1 em,
+.v2-interior .v2-heading em,
+.v2-stories-feature h2 em {
+  font-weight: 500 !important;
+  color: #943552 !important;
+}
+
+.v2-interior-headline > p,
+.v2-about-mission-grid p,
+.v2-about-mission-grid > div:nth-child(2) p,
+.v2-center-heading > p,
+.v2-body,
+.v2-content-card p,
+.v2-about-values-grid article p,
+.v2-about-values-grid p,
+.v2-stories-feature > p,
+.v2-stories-inspiration p,
+.v2-faq-list details p,
+.v2-interior-faq .v2-faq-layout > div > p,
+.v2-featured-heading p {
+  color: #4f4750 !important;
+  font-weight: 450 !important;
+  -webkit-font-smoothing: auto !important;
+  -moz-osx-font-smoothing: auto !important;
+}
+
+.v2-interior .v2-eyebrow,
+.v2-interior .v2-eyebrow.v2-eyebrow-light {
+  font-weight: 700 !important;
+  letter-spacing: 1.6px;
+}
+
+.v2-interior-cta p {
+  color: #f0e4ea !important;
+  font-weight: 450 !important;
+}

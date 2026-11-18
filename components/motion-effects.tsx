@@ -37,10 +37,14 @@ export function MotionEffects(){
       observer?.unobserve(element);
       if(reduced.matches||!element.animate||document.hidden)return;
       const index=Array.from(element.parentElement?.children||[]).indexOf(element);
-      const animation=element.animate([
-        {opacity:0.001,transform:'translateY(18px)'},
-        {opacity:1,transform:'translateY(0)'}
-      ],{duration:520,delay:Math.min(Math.max(index,0),3)*35,easing:'cubic-bezier(.2,.7,.2,1)',fill:'none'});
+      // Avoid opacity on text blocks — opacity+transform makes type look soft/blurry on Windows.
+      const textBlock=element.matches('.v2-interior-headline,.v2-interior-section-heading,.v2-about-mission-grid > div,.v2-stories-grid > div,.v2-faq-layout > div,.v5-hero-copy,.v5-editorial-copy,.v5-section-top,.page-heading,.dc-contact-hero,.auth-card,.auth-visual-copy');
+      const animation=element.animate(
+        textBlock
+          ? [{transform:'translateY(14px)'},{transform:'translateY(0)'}]
+          : [{opacity:0.001,transform:'translateY(18px)'},{opacity:1,transform:'translateY(0)'}],
+        {duration:520,delay:Math.min(Math.max(index,0),3)*35,easing:'cubic-bezier(.2,.7,.2,1)',fill:'none'}
+      );
       running.add(animation);
       animation.finished.catch(()=>{}).finally(()=>running.delete(animation));
     }
