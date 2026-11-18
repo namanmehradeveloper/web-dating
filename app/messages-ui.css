@@ -927,8 +927,7 @@ body.dc-msg-route .dc-header-messages .dc-logo-mark{width:34px;height:34px;borde
   display:grid;
   grid-template-columns:repeat(6, 1fr);
   gap:4px;
-  max-height:160px;
-  overflow-y:auto;
+  overflow:hidden;
 }
 .dc-messages .msg-emoji-cell{
   width:38px;

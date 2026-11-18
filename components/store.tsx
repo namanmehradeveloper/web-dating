@@ -3,11 +3,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { Gift, Coins, Smile, Sparkles } from 'lucide-react';
 import { request, messageOf, mediaUrl } from '@/lib/api';
 import type { StoreItem, StoreWallet } from '@/lib/types';
-import { Button, Panel, Loading, Empty, Badge } from './ui';
+import { Button, Panel, Loading, Empty, Badge, Modal } from './ui';
 import { useApp } from './provider';
 import { Heading } from './extras';
 
 type Tab = 'coins' | 'emojis' | 'gifts';
+
+type PendingPurchase =
+  | { kind: 'COIN_PACK'; item: StoreItem; outcome: 'SUCCESS' | 'FAILURE' }
+  | { kind: 'COINS'; item: StoreItem };
 
 export function Store() {
   const { notify } = useApp();
@@ -17,6 +21,7 @@ export function Store() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
+  const [pending, setPending] = useState<PendingPurchase | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -79,6 +84,35 @@ export function Store() {
       setBusyId('');
     }
   };
+
+  const confirmPending = async () => {
+    if (!pending) return;
+    const next = pending;
+    setPending(null);
+    if (next.kind === 'COIN_PACK') await buyCoins(next.item.id, next.outcome);
+    else await buyWithCoins(next.item.id);
+  };
+
+  const confirmCopy = (() => {
+    if (!pending) return { title: 'Confirm purchase', body: '' };
+    const { item } = pending;
+    if (pending.kind === 'COIN_PACK') {
+      if (pending.outcome === 'FAILURE') {
+        return {
+          title: 'Simulate failed payment?',
+          body: `This will simulate a failed checkout for “${item.title}”. No coins will be added.`,
+        };
+      }
+      return {
+        title: 'Confirm demo purchase?',
+        body: `Buy “${item.title}” (${item.priceLabel || 'demo'})? Coins will be added to your wallet.`,
+      };
+    }
+    return {
+      title: 'Confirm purchase?',
+      body: `Buy “${item.title}” for ${item.priceCoins || 0} coins?`,
+    };
+  })();
 
   const items =
     tab === 'coins' ? catalog?.coinPacks || [] : tab === 'emojis' ? catalog?.emojiPacks || [] : catalog?.gifts || [];
@@ -148,14 +182,14 @@ export function Store() {
                       <>
                         <Button
                           disabled={Boolean(busyId)}
-                          onClick={() => void buyCoins(item.id, 'SUCCESS')}
+                          onClick={() => setPending({ kind: 'COIN_PACK', item, outcome: 'SUCCESS' })}
                         >
                           {busyId === `${item.id}:SUCCESS` ? 'Buying…' : 'Demo buy'}
                         </Button>
                         <Button
                           tone="outline"
                           disabled={Boolean(busyId)}
-                          onClick={() => void buyCoins(item.id, 'FAILURE')}
+                          onClick={() => setPending({ kind: 'COIN_PACK', item, outcome: 'FAILURE' })}
                         >
                           Simulate fail
                         </Button>
@@ -163,7 +197,7 @@ export function Store() {
                     ) : (
                       <Button
                         disabled={Boolean(busyId) || owned}
-                        onClick={() => void buyWithCoins(item.id)}
+                        onClick={() => setPending({ kind: 'COINS', item })}
                       >
                         {owned ? 'Owned' : busyId === item.id ? 'Buying…' : `Buy · ${item.priceCoins || 0} coins`}
                       </Button>
@@ -175,6 +209,20 @@ export function Store() {
           </div>
         )}
       </Panel>
+
+      {pending && (
+        <Modal title={confirmCopy.title} onClose={() => setPending(null)}>
+          <p className="muted" style={{ marginBottom: 18 }}>{confirmCopy.body}</p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <Button tone="outline" onClick={() => setPending(null)} disabled={Boolean(busyId)}>
+              No
+            </Button>
+            <Button onClick={() => void confirmPending()} disabled={Boolean(busyId)}>
+              Yes, buy
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
