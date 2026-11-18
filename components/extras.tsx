@@ -1,17 +1,42 @@
 'use client';
 import { useEffect,useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { BellRing, Crown, ShieldCheck, Ban, LogOut, AlertTriangle, Shield, ChevronRight, MapPin, Monitor, UserRound, Database, LifeBuoy, Mail, Phone } from 'lucide-react';
 import { useApp } from './provider';
+import { useMessages } from './message-provider';
 import { request,messageOf } from '@/lib/api';
 import type {Notification,Product,Entitlement,Member,Ticket} from '@/lib/types';
 import { Avatar,Button,Panel,Loading,Empty,Badge,Failure } from './ui';
 function useGet<T>(path:string) {const [data,setData]=useState<T|null>(null);const [loading,setLoading]=useState(true);const[error,setError]=useState('');const refresh=async()=>{setLoading(true);setError('');try{setData(await request<T>('GET',path))}catch(e){setError(messageOf(e))}finally{setLoading(false)}};useEffect(()=>{void refresh()},[path]);return {data,loading,error,refresh}}
-export function Notifications(){const {notify}=useApp();const {data,loading,error,refresh}=useGet<{items:Notification[]}>('/notifications?limit=50');const prefs=useGet<Record<string,boolean>>('/notification-preferences');
- const change=async(key:string,v:boolean)=>{try{await request('PATCH','/notification-preferences',{body:{[key]:v}});void prefs.refresh()}catch(e){notify(messageOf(e))}};
- const read=async(id:string)=>{try{await request('POST',`/notifications/${id}/read`);void refresh()}catch(e){notify(messageOf(e))}};
- return <div><Heading label="STAY IN THE LOOP" title="Notifications" description="Never miss a connection."/><div className="two-panel"><Panel title="Your notifications" subtitle="All the latest updates in one place.">{loading?<Loading/>:error?<p className="field-error">{error}</p>:data?.items?.length?data.items.map(n=><button key={n.id} className={`notification-row ${!n.isRead&&!n.readAt?'unread':''}`} onClick={()=>void read(n.id)}><span className="notification-icon"><BellRing size={18}/></span><span><strong>{n.title||n.type||'Notification'}</strong><small>{n.body||n.message||''}</small><small>{n.createdAt?new Date(n.createdAt).toLocaleString():''}</small></span>{!n.isRead&&!n.readAt&&<span className="notification-dot"/>}</button>):<Empty title="All caught up" detail="Your notifications will appear here."/>}</Panel>
- <Panel title="Notification preferences" subtitle="Choose which updates to receive.">{prefs.loading?<Loading/>:['newMatches','messages','likes','promotions'].map(k=><label key={k} className="setting-row"><span><strong>{({newMatches:'New matches',messages:'Messages',likes:'Likes',promotions:'Offers and updates'} as Record<string,string>)[k]}</strong></span><input type="checkbox" checked={Boolean(prefs.data?.[k])} onChange={e=>void change(k,e.target.checked)} disabled={!prefs.data}/></label>)}</Panel></div></div>
+export function Notifications(){
+  const {notify}=useApp();
+  const router=useRouter();
+  const {refreshInboxUnread,soundMuted,setSoundMuted}=useMessages();
+  const {data,loading,error,refresh}=useGet<{items:Notification[]}>('/notifications?limit=50');
+  const prefs=useGet<Record<string,boolean>>('/notification-preferences');
+  const change=async(key:string,v:boolean)=>{try{await request('PATCH','/notification-preferences',{body:{[key]:v}});void prefs.refresh()}catch(e){notify(messageOf(e))}};
+  const openNotification=async(n:Notification)=>{
+    try{
+      if(!n.readAt && !n.isRead){
+        await request('POST',`/notifications/${n.id}/read`);
+        void refresh();
+        void refreshInboxUnread();
+      }
+    }catch(e){notify(messageOf(e))}
+    const conversationId=n.data?.conversationId;
+    if(n.type==='NEW_MESSAGE' && conversationId){
+      router.push(`/messages/${encodeURIComponent(conversationId)}`);
+      return;
+    }
+    if(n.type==='NEW_MATCH' && n.data?.matchId){
+      router.push('/matches');
+    }
+  };
+  return <div><Heading label="STAY IN THE LOOP" title="Notifications" description="Never miss a connection."/><div className="two-panel"><Panel title="Your notifications" subtitle="All the latest updates in one place.">{loading?<Loading/>:error?<p className="field-error">{error}</p>:data?.items?.length?data.items.map(n=><button key={n.id} className={`notification-row ${!n.isRead&&!n.readAt?'unread':''}`} onClick={()=>void openNotification(n)}><span className="notification-icon"><BellRing size={18}/></span><span><strong>{n.title||n.type||'Notification'}</strong><small>{n.body||n.message||''}</small><small>{n.createdAt?new Date(n.createdAt).toLocaleString():''}</small></span>{!n.isRead&&!n.readAt&&<span className="notification-dot"/>}</button>):<Empty title="All caught up" detail="Your notifications will appear here."/>}</Panel>
+ <Panel title="Notification preferences" subtitle="Choose which updates to receive.">{prefs.loading?<Loading/>:['newMatches','messages','likes','promotions'].map(k=><label key={k} className="setting-row"><span><strong>{({newMatches:'New matches',messages:'Messages',likes:'Likes',promotions:'Offers and updates'} as Record<string,string>)[k]}</strong></span><input type="checkbox" checked={Boolean(prefs.data?.[k])} onChange={e=>void change(k,e.target.checked)} disabled={!prefs.data}/></label>)}
+ <label className="setting-row"><span><strong>Message sounds (this browser)</strong></span><input type="checkbox" checked={!soundMuted} onChange={e=>setSoundMuted(!e.target.checked)}/></label>
+ </Panel></div></div>
 }
 export function Premium(){
   const {notify}=useApp();

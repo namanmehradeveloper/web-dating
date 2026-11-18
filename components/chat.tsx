@@ -12,6 +12,7 @@ import type { Conversation, ChatMessage, ChatCallLog, StoreItem, StoreWallet } f
 import { Avatar, Button, Empty, Failure, Loading, Modal } from './ui';
 import { useApp } from './provider';
 import { useCall } from './call-provider';
+import { useMessages } from './message-provider';
 import Link from 'next/link';
 
 const reasons = ['FAKE_PROFILE', 'INAPPROPRIATE_PHOTOS', 'HARASSMENT', 'SPAM_OR_SCAM', 'UNDERAGE', 'OFFLINE_BEHAVIOUR', 'OTHER'];
@@ -192,6 +193,7 @@ function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
 export function Chat({ go }: { go: (p: string) => void }) {
   const { session, notify } = useApp();
   const { activeCall, callConnected, startCall: placeCall } = useCall();
+  const { setActiveConversationId, markConversationRead } = useMessages();
   const pathname = usePathname();
   const query = useSearchParams();
   const pathConversation = pathname.match(/^\/messages\/([^/?#]+)/)?.[1] || null;
@@ -289,6 +291,13 @@ export function Chat({ go }: { go: (p: string) => void }) {
       socket.auth = { token: session.accessToken };
     }
   }, [session?.accessToken]);
+
+  // Tell the global message listener which thread is open (suppress toast/unread for it).
+  useEffect(() => {
+    setActiveConversationId(selected);
+    if (selected) markConversationRead(selected);
+    return () => setActiveConversationId(null);
+  }, [selected, setActiveConversationId, markConversationRead]);
 
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const thread = threadRef.current;

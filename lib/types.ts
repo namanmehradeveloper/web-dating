@@ -67,7 +67,24 @@ export type Conversation = {
   lastMessage?: ChatMessage; unreadCount: number;
 };
 export type Like = { id?: string; user: Member; action: string; likedAt?: string };
-export type Notification = { id: string; title?: string; body?: string; message?: string; type?: string; isRead?: boolean; readAt?: string; createdAt?: string };
+export type Notification = {
+  id: string;
+  title?: string;
+  body?: string;
+  message?: string;
+  type?: string;
+  isRead?: boolean;
+  readAt?: string | null;
+  createdAt?: string;
+  data?: {
+    conversationId?: string;
+    messageId?: string;
+    senderId?: string;
+    receiverId?: string;
+    matchId?: string;
+    [key: string]: string | undefined;
+  };
+};
 export type Product = {
   id: string;
   title: string;

@@ -8,8 +8,8 @@ import {
   Settings, Info, CreditCard, MessagesSquare, Zap, Compass, MessageCircle, Store,
 } from 'lucide-react';
 import { useApp } from './provider';
+import { useMessages } from './message-provider';
 import { Avatar } from './ui';
-import { request } from '@/lib/api';
 
 const publicLinks = [
   ['Home', '/'],
@@ -42,11 +42,11 @@ export function Logo({ inverse = false }: { inverse?: boolean }) {
 
 export function SiteHeader() {
   const { session, me, signOut } = useApp();
+  const { unreadTotal, inboxUnread, refreshInboxUnread } = useMessages();
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [account, setAccount] = useState(false);
-  const [unreadNotifs, setUnreadNotifs] = useState(0);
   const menuButton = useRef<HTMLButtonElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
 
@@ -76,21 +76,11 @@ export function SiteHeader() {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [account]);
 
-  // Fetch unread notifications count when logged in
+  // Keep inbox badge in sync when navigating between member pages
   useEffect(() => {
     if (!session) return;
-    let active = true;
-    request<{ items: { isRead?: boolean; readAt?: string | null }[] }>('GET', '/notifications?limit=25')
-      .then((res) => {
-        if (!active) return;
-        const count = (res.items || []).filter((n) => !n.isRead && !n.readAt).length;
-        setUnreadNotifs(count);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [session, pathname]);
+    void refreshInboxUnread();
+  }, [session, pathname, refreshInboxUnread]);
 
   // Mobile menu keyboard and resize listeners (guests only)
   useEffect(() => {
@@ -130,6 +120,7 @@ export function SiteHeader() {
         <nav className={`dc-nav ${open ? 'open' : ''}`} id="main-navigation" aria-label="Main navigation">
           {navLinks.map(([label, url]) => {
             const isActive = pathname === url || (url === '/messages' && pathname.startsWith('/messages/'));
+            const showMsgBadge = session && url === '/messages' && unreadTotal > 0;
             return (
               <Link
                 key={url}
@@ -139,6 +130,11 @@ export function SiteHeader() {
                 onClick={() => setOpen(false)}
               >
                 {label}
+                {showMsgBadge && (
+                  <span className="dc-nav-msg-badge" aria-label={`${unreadTotal} unread messages`}>
+                    {unreadTotal > 99 ? '99+' : unreadTotal}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -162,7 +158,7 @@ export function SiteHeader() {
             <>
               <Link href="/notifications" className="dc-header-icon" title="Notifications" aria-label="Notifications">
                 <Bell size={18} strokeWidth={1.8} />
-                {unreadNotifs > 0 && <span className="dc-notif-dot" />}
+                {inboxUnread > 0 && <span className="dc-notif-dot" />}
               </Link>
 
               {/* User Account Dropdown — same on desktop & mobile */}
