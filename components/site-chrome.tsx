@@ -284,7 +284,7 @@ export function SiteFooter() {
       <div className="dc-footer-inner">
         <div className="dc-footer-main">
           <div className="dc-footer-brand">
-            <Logo inverse />
+            <Logo />
             <p>
               Real people, genuine conversations, new possibilities. Meet at your own pace, in a place built for
               meaningful connection.

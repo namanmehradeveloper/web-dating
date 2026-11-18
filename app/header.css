@@ -129,24 +129,45 @@ body.dc-msg-route .dc-header-messages .dc-header-inner {
   color: var(--v5-plum, #3e2942);
 }
 
-/* Footer brand: keep wordmark crisp on dark background */
+/* Footer brand: keep wordmark crisp */
 .dc-footer .dc-logo,
 .dc-footer .dc-logo-name,
-.dc-footer .dc-logo-name small {
+.dc-footer .dc-logo-name small,
+.dc-footer-brand p,
+.dc-footer-brand > span,
+.dc-footer-links h3,
+.dc-footer-links a,
+.dc-footer-end,
+.dc-footer-end span {
   filter: none !important;
   text-shadow: none !important;
   opacity: 1;
   transform: none;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
 }
 
 .dc-footer .dc-logo-name {
-  color: #ffffff;
+  color: var(--v5-plum, #3e2942) !important;
 }
 
 .dc-footer .dc-logo-name > span {
-  color: #b0b0b0;
+  color: #943552 !important;
+}
+
+.dc-footer .dc-logo-name small {
+  color: #5f5160 !important;
+  font-size: 10px;
+}
+
+.dc-footer .dc-logo.inverse,
+.dc-footer .dc-logo.inverse .dc-logo-name {
+  color: var(--v5-plum, #3e2942) !important;
+}
+
+.dc-footer .dc-logo.inverse .dc-logo-name > span {
+  color: #943552 !important;
 }
 
 /* —— Navigation —— */

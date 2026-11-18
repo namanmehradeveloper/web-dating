@@ -38,9 +38,9 @@ export function MotionEffects(){
       if(reduced.matches||!element.animate||document.hidden)return;
       const index=Array.from(element.parentElement?.children||[]).indexOf(element);
       const animation=element.animate([
-        {opacity:0,transform:'translate3d(0,22px,0)'},
-        {opacity:1,transform:'translate3d(0,0,0)'}
-      ],{duration:640,delay:Math.min(Math.max(index,0),3)*45,easing:'cubic-bezier(.2,.7,.2,1)',fill:'backwards'});
+        {opacity:0.001,transform:'translateY(18px)'},
+        {opacity:1,transform:'translateY(0)'}
+      ],{duration:520,delay:Math.min(Math.max(index,0),3)*35,easing:'cubic-bezier(.2,.7,.2,1)',fill:'none'});
       running.add(animation);
       animation.finished.catch(()=>{}).finally(()=>running.delete(animation));
     }
