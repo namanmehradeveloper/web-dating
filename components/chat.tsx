@@ -9,9 +9,9 @@ import {
 import { io, Socket } from 'socket.io-client';
 import { request, upload, uid, mediaUrl, messageOf } from '@/lib/api';
 import type { Conversation, ChatMessage, ChatCallLog, StoreItem, StoreWallet } from '@/lib/types';
-import { CallOverlay, type ActiveCall, type AgoraCredentials, type CallInfo } from './call-overlay';
 import { Avatar, Button, Empty, Failure, Loading, Modal } from './ui';
 import { useApp } from './provider';
+import { useCall } from './call-provider';
 import Link from 'next/link';
 
 const reasons = ['FAKE_PROFILE', 'INAPPROPRIATE_PHOTOS', 'HARASSMENT', 'SPAM_OR_SCAM', 'UNDERAGE', 'OFFLINE_BEHAVIOUR', 'OTHER'];
@@ -191,6 +191,7 @@ function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
 
 export function Chat({ go }: { go: (p: string) => void }) {
   const { session, notify } = useApp();
+  const { activeCall, callConnected, startCall: placeCall } = useCall();
   const pathname = usePathname();
   const query = useSearchParams();
   const pathConversation = pathname.match(/^\/messages\/([^/?#]+)/)?.[1] || null;
@@ -216,7 +217,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const [sending, setSending] = useState(false);
   /** connecting = first join; online = live; offline = dropped after a successful connect */
   const [liveStatus, setLiveStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
-  const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [typing, setTyping] = useState(false);
   const [options, setOptions] = useState(false);
   const [messageMenu, setMessageMenu] = useState<string | null>(null);
@@ -227,7 +227,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const [newBelow, setNewBelow] = useState(0);
   const [atBottom, setAtBottom] = useState(true);
   const socketRef = useRef<Socket | null>(null);
-  const activeCallRef = useRef<ActiveCall | null>(null);
   const selectedRef = useRef<string | null>(selected);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
@@ -242,7 +241,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const notifyRef = useRef(notify);
   const loadRef = useRef<(showLoader?: boolean) => Promise<void>>(async () => {});
   const goRef = useRef(go);
-  const updateActiveCallRef = useRef<(next: ActiveCall | null) => void>(() => {});
   const tokenRef = useRef(session?.accessToken);
   const everConnected = useRef(false);
 
@@ -282,14 +280,8 @@ export function Chat({ go }: { go: (p: string) => void }) {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [emojiOpen]);
 
-  const updateActiveCall = useCallback((next: ActiveCall | null) => {
-    activeCallRef.current = next;
-    setActiveCall(next);
-  }, []);
-
   useEffect(() => { notifyRef.current = notify; }, [notify]);
   useEffect(() => { goRef.current = go; }, [go]);
-  useEffect(() => { updateActiveCallRef.current = updateActiveCall; }, [updateActiveCall]);
   useEffect(() => {
     tokenRef.current = session?.accessToken;
     const socket = socketRef.current;
@@ -297,16 +289,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
       socket.auth = { token: session.accessToken };
     }
   }, [session?.accessToken]);
-
-  useEffect(() => () => {
-    const current = activeCallRef.current;
-    if (!current) return;
-    const action = current.call.status === 'RINGING'
-      ? current.direction === 'OUTGOING' ? 'cancel' : 'reject'
-      : 'end';
-    void request('POST', `/calls/${encodeURIComponent(current.call.id)}/${action}`)
-      .catch((error) => notifyRef.current(`Could not close the call: ${messageOf(error)}`));
-  }, []);
 
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const thread = threadRef.current;
@@ -434,18 +416,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
       everConnected.current = true;
       setLiveStatus('online');
       void loadRef.current(false);
-      void request<{ call: CallInfo | null; direction: ActiveCall['direction'] | null; credentials: AgoraCredentials | null }>('GET', '/calls/active')
-        .then((result) => {
-          if (!result.call || !result.direction) return;
-          if (activeCallRef.current?.call.id === result.call.id) {
-            if (result.credentials && !activeCallRef.current.credentials) {
-              updateActiveCallRef.current({ ...activeCallRef.current, call: result.call, credentials: result.credentials });
-            }
-            return;
-          }
-          updateActiveCallRef.current({ call: result.call, direction: result.direction, credentials: result.credentials });
-        })
-        .catch((e) => notifyRef.current(`Could not restore the active call: ${messageOf(e)}`));
       const id = selectedRef.current;
       if (id) {
         void request<{ items: ChatMessage[] }>('GET', `/conversations/${encodeURIComponent(id)}/messages?limit=50`)
@@ -530,38 +500,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
     });
     socket.on('match:new', () => void loadRef.current(false));
     socket.on('match:removed', () => void loadRef.current(false));
-    socket.on('call:incoming', ({ call }: { call: CallInfo }) => {
-      if (call.calleeId !== userId) return;
-      if (activeCallRef.current && activeCallRef.current.call.id !== call.id) {
-        notifyRef.current('Another incoming call could not be shown while a call is active.');
-        return;
-      }
-      updateActiveCallRef.current({ call, direction: 'INCOMING', credentials: null });
-    });
-    socket.on('call:accepted', ({ call }: { call: CallInfo }) => {
-      const current = activeCallRef.current;
-      if (current?.call.id === call.id) {
-        updateActiveCallRef.current({ ...current, call });
-        if (!current.credentials) {
-          void request<{ call: CallInfo | null; credentials: AgoraCredentials | null }>('GET', '/calls/active')
-            .then((result) => {
-              if (result.call?.id === call.id && result.credentials && activeCallRef.current?.call.id === call.id) {
-                updateActiveCallRef.current({ ...activeCallRef.current, call: result.call, credentials: result.credentials });
-              }
-            })
-            .catch((e) => notifyRef.current(`Could not restore the accepted call: ${messageOf(e)}`));
-        }
-      }
-    });
-    const finishCall = ({ call }: { call: CallInfo }, message: string) => {
-      if (activeCallRef.current?.call.id !== call.id) return;
-      updateActiveCallRef.current(null);
-      notifyRef.current(message);
-    };
-    socket.on('call:rejected', (event: { call: CallInfo }) => finishCall(event, 'The call was declined.'));
-    socket.on('call:cancelled', (event: { call: CallInfo }) => finishCall(event, 'The call was cancelled.'));
-    socket.on('call:missed', (event: { call: CallInfo }) => finishCall(event, 'The call was missed.'));
-    socket.on('call:ended', (event: { call: CallInfo }) => finishCall(event, 'The call ended.'));
     return () => {
       socket.disconnect();
       socketRef.current = null;
@@ -790,71 +728,23 @@ export function Chat({ go }: { go: (p: string) => void }) {
 
   const startCall = async (type: 'AUDIO' | 'VIDEO') => {
     if (!convo) return;
-    if (!socketRef.current?.connected) {
+    if (!callConnected && !socketRef.current?.connected) {
       notify('Connect to live messaging before starting a call.');
       return;
     }
-    if (activeCallRef.current) {
+    if (activeCall) {
       notify('You are already in a call.');
       return;
     }
-    try {
-      const result = await request<{ call: CallInfo; credentials: AgoraCredentials | null }>('POST', '/calls', {
-        body: { conversationId: convo.id, type },
-      });
-      if (result.call.status === 'BUSY') {
-        notify(`${convo.otherUser.displayName} is busy right now.`);
-        return;
-      }
-      if (!result.credentials) throw new Error('The server did not return call credentials.');
-      updateActiveCall({ call: result.call, direction: 'OUTGOING', credentials: result.credentials });
-    } catch (e) {
-      notify(messageOf(e));
-    }
-  };
-
-  const acceptCall = async () => {
-    const current = activeCallRef.current;
-    if (!current) return;
-    try {
-      const result = await request<{ call: CallInfo; credentials: AgoraCredentials }>('POST', `/calls/${encodeURIComponent(current.call.id)}/accept`);
-      updateActiveCall({ ...current, call: result.call, credentials: result.credentials });
-    } catch (e) {
-      notify(messageOf(e));
-    }
-  };
-
-  const rejectCall = async () => {
-    const current = activeCallRef.current;
-    if (!current) return;
-    try {
-      await request('POST', `/calls/${encodeURIComponent(current.call.id)}/reject`);
-      updateActiveCall(null);
-    } catch (e) {
-      notify(messageOf(e));
-    }
-  };
-
-  const cancelCall = async () => {
-    const current = activeCallRef.current;
-    if (!current) return;
-    try {
-      await request('POST', `/calls/${encodeURIComponent(current.call.id)}/cancel`);
-      updateActiveCall(null);
-    } catch (e) {
-      notify(messageOf(e));
-    }
-  };
-
-  const endCall = async () => {
-    const current = activeCallRef.current;
-    if (!current) return;
-    try {
-      await request('POST', `/calls/${encodeURIComponent(current.call.id)}/end`);
-      updateActiveCall(null);
-    } catch (e) {
-      notify(messageOf(e));
-    }
+    const photo = convo.otherUser.photos?.[0]?.url;
+    await placeCall({
+      conversationId: convo.id,
+      type,
+      peer: {
+        displayName: convo.otherUser.displayName || 'Dating Cloud member',
+        photoUrl: photo ? mediaUrl(photo) : undefined,
+      },
+    });
   };
 
   return (
@@ -1499,23 +1389,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
           </div>
         </Modal>
       )}
-      {activeCall && (() => {
-        const peer = conversations.find((item) => item.id === activeCall.call.conversationId)?.otherUser;
-        const peerPhoto = peer?.photos?.[0]?.url ? mediaUrl(peer.photos[0].url) : undefined;
-        return (
-          <CallOverlay
-            activeCall={activeCall}
-            peerName={peer?.displayName || 'Dating Cloud member'}
-            peerPhotoUrl={peerPhoto}
-            currentUserId={session?.userId}
-            socket={socketRef.current}
-            onAccept={acceptCall}
-            onReject={rejectCall}
-            onCancel={cancelCall}
-            onEnd={endCall}
-          />
-        );
-      })()}
     </div>
   );
 }
