@@ -1016,7 +1016,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
                       const showDay = !prev || !sameDay(prev.sentAt, msg.sentAt);
                       const grouped = isGroupedWith(prev, msg);
                       const groupEnd = !next || !isGroupedWith(msg, next);
-                      const showAvatar = !mine && groupEnd;
                       return (
                         <div key={msg.id} className="msg-item">
                           {showDay && (
@@ -1025,11 +1024,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
                             </div>
                           )}
                           <div className={`bubble-group msg-bubble-row ${mine ? 'mine' : 'theirs'}${call ? ' msg-call-row' : ''}${msg.gift || msg.paidEmoji ? ' msg-gift-row' : ''}${grouped ? ' grouped' : ' group-start'}${groupEnd ? ' group-end' : ''}`}>
-                            {!mine && (
-                              <span className={`msg-bubble-avatar ${showAvatar ? '' : 'invisible'}`} aria-hidden={!showAvatar}>
-                                {showAvatar ? <Avatar user={convo.otherUser} size={28} /> : null}
-                              </span>
-                            )}
                             <div className="msg-bubble-stack">
                               <div className={`message-bubble ${unsent ? 'msg-unsent' : ''}${call && !unsent ? ' msg-call' : ''}${callMissed ? ' msg-call-missed' : ''}${msg.gift && !unsent ? ' msg-gift' : ''}${msg.paidEmoji && !unsent ? ' msg-paid-emoji' : ''}`}>
                                 {unsent ? (
@@ -1120,7 +1114,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
                   )}
                   {typing && (
                     <div className="msg-bubble-row theirs typing-row group-end" aria-live="polite">
-                      <span className="msg-bubble-avatar"><Avatar user={convo.otherUser} size={28} /></span>
                       <div className="message-bubble msg-typing-bubble">
                         <span className="dc-typing-dots" aria-hidden="true"><i /><i /><i /></span>
                         <span className="sr-only">{convo.otherUser.displayName} is typing</span>
