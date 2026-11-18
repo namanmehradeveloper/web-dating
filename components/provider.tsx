@@ -44,7 +44,25 @@ export function AppProvider({children}: {children: React.ReactNode}) {
   const [ready, setReady] = useState(false);
   const [notice, setNotice] = useState('');
   const activeUser = useRef<string | null>(null);
-  const notify = useCallback((message: string) => { setNotice(message); }, []);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearNotice = useCallback(() => {
+    if (noticeTimer.current) {
+      clearTimeout(noticeTimer.current);
+      noticeTimer.current = null;
+    }
+    setNotice('');
+  }, []);
+  const notify = useCallback((message: string) => {
+    setNotice(message);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => {
+      noticeTimer.current = null;
+      setNotice('');
+    }, 5000);
+  }, []);
+  useEffect(() => () => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+  }, []);
   const assign = useCallback((value: Session | null) => {
     const previousUser = activeUser.current;
     activeUser.current = value?.userId || null;
@@ -141,7 +159,7 @@ export function AppProvider({children}: {children: React.ReactNode}) {
   };
   return <Context.Provider value={{session, me, meStatus, ready, reloadMe, signIn, signOut, notice, notify}}>
     {children}
-    {notice && <div className="toast" role="status"><span>{notice}</span><button aria-label="Dismiss notification" onClick={() => setNotice('')}>×</button></div>}
+    {notice && <div className="toast" role="status"><span>{notice}</span><button aria-label="Dismiss notification" onClick={clearNotice}>×</button></div>}
   </Context.Provider>;
 }
 export function useApp() { const ctx = useContext(Context); if (!ctx) throw new Error('Missing provider'); return ctx; }
