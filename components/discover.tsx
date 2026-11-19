@@ -3,11 +3,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Bookmark, Heart, MapPin, RotateCcw, Settings2, ShieldCheck, Sparkles, Star, X, Info } from 'lucide-react';
 import { request, uid, messageOf, mediaUrl } from '@/lib/api';
 import type { Member, Match } from '@/lib/types';
-import { Badge, Button, Empty, Failure, Loading, Modal, Avatar } from './ui';
+import { Badge, Button, Empty, Failure, Modal, Avatar } from './ui';
 import { useApp } from './provider';
+import { useCall } from './call-provider';
 
 export function Discover({go}: {go:(path:string)=>void}) {
   const {notify,me} = useApp();
+  const {callSocket} = useCall();
   const [profiles,setProfiles] = useState<Member[]>([]);
   const [busy,setBusy] = useState(false);
   const [swipeFeedback,setSwipeFeedback] = useState<'LIKE'|'PASS'|'SUPER_LIKE'|null>(null);
@@ -28,6 +30,15 @@ export function Discover({go}: {go:(path:string)=>void}) {
     setProfiles(d?.items||[]);setIdx(0);
   } catch(e){setError(messageOf(e))}finally{setLoading(false)}},[appliedFilters]);
   useEffect(()=>{void load()},[load]);
+  // When the other member likes you back while you are still on Discover, show the match modal.
+  useEffect(()=>{
+    if(!callSocket) return;
+    const onMatchNew=({match}:{match?:Match})=>{
+      if(match?.id) setMatched((current)=>current??match);
+    };
+    callSocket.on('match:new', onMatchNew);
+    return ()=>{ callSocket.off('match:new', onMatchNew); };
+  },[callSocket]);
   const profile=profiles[0];
   const swipe=async(action:'LIKE'|'PASS'|'SUPER_LIKE')=>{
     if(!profile||busy) return;
