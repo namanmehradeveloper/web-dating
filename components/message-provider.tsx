@@ -13,6 +13,12 @@ import {
 import { usePathname, useRouter } from 'next/navigation';
 import { MessageCircle, Volume2, VolumeX, X } from 'lucide-react';
 import { mediaUrl, request } from '@/lib/api';
+import {
+  notificationHeadline,
+  notificationHref,
+  notificationPhotoUrl,
+  notificationPreview,
+} from '@/lib/notification-navigation';
 import type { ChatMessage, Conversation, Member, Notification as InboxNotification } from '@/lib/types';
 import { useApp } from './provider';
 import { useCall } from './call-provider';
@@ -24,13 +30,15 @@ const SOUND_COOLDOWN_MS = 1200;
 
 export type MessageToast = {
   id: string;
-  conversationId: string;
-  messageId: string;
-  senderId: string;
+  href: string;
+  conversationId?: string;
+  messageId?: string;
+  notificationId?: string;
   senderName: string;
   photoUrl?: string;
   preview: string;
   sentAt: string;
+  ctaLabel?: string;
 };
 
 type MessageContextValue = {
@@ -44,6 +52,7 @@ type MessageContextValue = {
   markConversationRead: (conversationId: string) => void;
   refreshUnreadFromServer: () => Promise<void>;
   refreshInboxUnread: () => Promise<void>;
+  openNotificationDestination: (notification: InboxNotification) => Promise<void>;
 };
 
 const MessageContext = createContext<MessageContextValue | null>(null);
@@ -128,12 +137,14 @@ export function MessageProvider({ children }: { children: ReactNode }) {
   const toastRef = useRef<MessageToast | null>(null);
   const messagesPrefEnabledRef = useRef(true);
   const notifiedMessageIds = useRef<Set<string>>(new Set());
+  const notifiedInboxIds = useRef<Set<string>>(new Set());
   const senderCache = useRef<Map<string, { displayName: string; photoUrl?: string }>>(new Map());
   const soundRef = useRef<HTMLAudioElement | null>(null);
   const lastSoundAt = useRef(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioUnlocked = useRef(false);
   const pathnameRef = useRef(pathname);
+  const refreshInboxUnreadRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     pathnameRef.current = pathname;
@@ -239,9 +250,27 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     stopSound();
   }, [stopSound]);
 
-  const openConversation = useCallback((conversationId: string) => {
+  const openHref = useCallback((href: string) => {
     clearToast();
-    router.push(`/messages/${encodeURIComponent(conversationId)}`);
+    router.push(href);
+  }, [clearToast, router]);
+
+  const openConversation = useCallback((conversationId: string) => {
+    openHref(`/messages/${encodeURIComponent(conversationId)}`);
+  }, [openHref]);
+
+  const openNotificationDestination = useCallback(async (notification: InboxNotification) => {
+    const href = notificationHref(notification);
+    try {
+      if (!notification.readAt && !notification.isRead && notification.id) {
+        await request('POST', `/notifications/${encodeURIComponent(notification.id)}/read`);
+        void refreshInboxUnreadRef.current?.();
+      }
+    } catch {
+      /* still navigate — ownership failures leave the row unread */
+    }
+    clearToast();
+    router.push(href);
   }, [clearToast, router]);
 
   const showToast = useCallback((next: MessageToast) => {
@@ -279,13 +308,16 @@ export function MessageProvider({ children }: { children: ReactNode }) {
   const refreshInboxUnread = useCallback(async () => {
     if (!session?.userId) return;
     try {
-      const data = await request<{ items: InboxNotification[] }>('GET', '/notifications?limit=40');
-      const count = (data.items || []).filter((n) => !n.isRead && !n.readAt).length;
-      setInboxUnread(count);
+      const data = await request<{ count: number }>('GET', '/notifications/unread-count');
+      setInboxUnread(typeof data.count === 'number' ? data.count : 0);
     } catch {
       /* keep last known */
     }
   }, [session?.userId]);
+
+  useEffect(() => {
+    refreshInboxUnreadRef.current = refreshInboxUnread;
+  }, [refreshInboxUnread]);
 
   // Load prefs + unread when signed in.
   useEffect(() => {
@@ -294,6 +326,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
       setInboxUnread(0);
       setToast(null);
       notifiedMessageIds.current.clear();
+      notifiedInboxIds.current.clear();
       senderCache.current.clear();
       setActiveConversationId(null);
       return;
@@ -348,16 +381,18 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     if (viewingThis || alreadyNotified || !messagesPrefEnabledRef.current) return;
 
     const preview = messagePreview(message);
+    const href = `/messages/${encodeURIComponent(message.conversationId)}`;
     const cached = senderCache.current.get(message.senderId);
     const toastPayload: MessageToast = {
       id: `toast-${message.id}`,
+      href,
       conversationId: message.conversationId,
       messageId: message.id,
-      senderId: message.senderId,
       senderName: cached?.displayName || 'Dating Cloud member',
       photoUrl: cached?.photoUrl,
       preview,
       sentAt: message.sentAt,
+      ctaLabel: 'Open Chat',
     };
 
     // Show immediately (don't wait on profile fetch) so Discover/etc. always get a popup.
@@ -367,7 +402,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
       toastPayload.senderName,
       preview,
       `dc-msg-${message.conversationId}`,
-      () => openConversation(message.conversationId),
+      () => openHref(href),
     );
     void refreshInboxUnread();
 
@@ -380,7 +415,49 @@ export function MessageProvider({ children }: { children: ReactNode }) {
           : current
       ));
     }
-  }, [openConversation, playSound, refreshInboxUnread, refreshUnreadFromServer, showToast]);
+  }, [openHref, playSound, refreshInboxUnread, refreshUnreadFromServer, showToast]);
+
+  const handleInboxNotification = useCallback((notification: InboxNotification) => {
+    if (!notification?.id) return;
+    if (notifiedInboxIds.current.has(notification.id)) return;
+    notifiedInboxIds.current.add(notification.id);
+    if (notifiedInboxIds.current.size > 400) {
+      notifiedInboxIds.current = new Set([...notifiedInboxIds.current].slice(-200));
+    }
+
+    void refreshInboxUnread();
+
+    // Chat toasts already come from message:new — skip duplicate NEW_MESSAGE popup.
+    if (notification.type === 'NEW_MESSAGE') return;
+
+    const onNotifications = pathnameRef.current.startsWith('/notifications');
+    const onHelpTicket = pathnameRef.current.startsWith('/help')
+      && notification.data?.kind === 'SUPPORT_REPLY'
+      && pathnameRef.current.includes(notification.data?.ticketId || '___');
+
+    if (onNotifications || onHelpTicket) return;
+
+    const href = notificationHref(notification);
+    const photo = notificationPhotoUrl(notification);
+    const toastPayload: MessageToast = {
+      id: `inbox-${notification.id}`,
+      href,
+      notificationId: notification.id,
+      senderName: notificationHeadline(notification),
+      photoUrl: photo ? mediaUrl(photo) : undefined,
+      preview: notificationPreview(notification),
+      sentAt: notification.createdAt || new Date().toISOString(),
+      ctaLabel: 'Open',
+    };
+    showToast(toastPayload);
+    playSound();
+    showBrowserMessageNotification(
+      toastPayload.senderName,
+      toastPayload.preview,
+      `dc-inbox-${notification.id}`,
+      () => { void openNotificationDestination(notification); },
+    );
+  }, [openNotificationDestination, playSound, refreshInboxUnread, showToast]);
 
   // Global listener on the shared CallProvider socket (no second Socket.IO client).
   useEffect(() => {
@@ -389,6 +466,10 @@ export function MessageProvider({ children }: { children: ReactNode }) {
 
     const onNew = ({ message }: { message: ChatMessage }) => {
       void handleIncomingMessage(message, userId);
+    };
+
+    const onInbox = ({ notification }: { notification: InboxNotification }) => {
+      handleInboxNotification(notification);
     };
 
     const onRead = ({ conversationId, readerId }: { conversationId: string; readerId?: string }) => {
@@ -414,15 +495,20 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     };
 
     callSocket.on('message:new', onNew);
+    callSocket.on('notification:new', onInbox);
     callSocket.on('message:read', onRead);
     callSocket.on('message:deleted', onDeleted);
     callSocket.on('message:unsent', onUnsent);
     callSocket.on('conversation:deleted', onConversationDeleted);
 
-    if (callConnected) void refreshUnreadFromServer();
+    if (callConnected) {
+      void refreshUnreadFromServer();
+      void refreshInboxUnread();
+    }
 
     return () => {
       callSocket.off('message:new', onNew);
+      callSocket.off('notification:new', onInbox);
       callSocket.off('message:read', onRead);
       callSocket.off('message:deleted', onDeleted);
       callSocket.off('message:unsent', onUnsent);
@@ -433,8 +519,10 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     callSocket,
     callConnected,
     handleIncomingMessage,
+    handleInboxNotification,
     markConversationRead,
     refreshUnreadFromServer,
+    refreshInboxUnread,
     clearToast,
   ]);
 
@@ -454,6 +542,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     markConversationRead,
     refreshUnreadFromServer,
     refreshInboxUnread,
+    openNotificationDestination,
   }), [
     unreadTotal,
     unreadByConversation,
@@ -465,6 +554,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     markConversationRead,
     refreshUnreadFromServer,
     refreshInboxUnread,
+    openNotificationDestination,
   ]);
 
   return (
@@ -475,7 +565,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
           <button
             type="button"
             className="dc-msg-toast-main"
-            onClick={() => openConversation(toast.conversationId)}
+            onClick={() => openHref(toast.href)}
           >
             <span className="dc-msg-toast-avatar" aria-hidden>
               <Avatar
@@ -499,9 +589,9 @@ export function MessageProvider({ children }: { children: ReactNode }) {
             <button
               type="button"
               className="dc-msg-toast-open"
-              onClick={() => openConversation(toast.conversationId)}
+              onClick={() => openHref(toast.href)}
             >
-              Open Chat
+              {toast.ctaLabel || 'Open'}
             </button>
             <button
               type="button"

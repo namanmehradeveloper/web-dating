@@ -199,3 +199,60 @@
     animation: none;
   }
 }
+
+.notification-row-focus {
+  outline: 2px solid color-mix(in srgb, var(--dc-accent, #6b4eff) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.ticket-row {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ticket-row-active {
+  border-color: color-mix(in srgb, var(--dc-accent, #6b4eff) 40%, transparent);
+  background: color-mix(in srgb, var(--dc-accent, #6b4eff) 8%, transparent);
+}
+
+.ticket-thread {
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 4px 2px 8px;
+}
+
+.ticket-bubble {
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, #0f172a 4%, white);
+  border: 1px solid color-mix(in srgb, #0f172a 8%, transparent);
+}
+
+.ticket-bubble strong {
+  display: block;
+  font-size: 0.78rem;
+  margin-bottom: 4px;
+}
+
+.ticket-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ticket-bubble small {
+  display: block;
+  margin-top: 6px;
+  opacity: 0.65;
+}
+
+.ticket-bubble-staff {
+  background: color-mix(in srgb, #2563eb 8%, white);
+}
+
+.ticket-bubble-user {
+  background: color-mix(in srgb, #059669 7%, white);
+}

@@ -1,42 +1,159 @@
 'use client';
-import { useEffect,useState } from 'react';
+import { useCallback,useEffect,useMemo,useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { BellRing, Crown, ShieldCheck, Ban, LogOut, AlertTriangle, Shield, ChevronRight, MapPin, Monitor, UserRound, Database, LifeBuoy, Mail, Phone } from 'lucide-react';
 import { useApp } from './provider';
 import { useMessages } from './message-provider';
-import { request,messageOf } from '@/lib/api';
-import type {Notification,Product,Entitlement,Member,Ticket} from '@/lib/types';
+import { request,messageOf,mediaUrl } from '@/lib/api';
+import { notificationHeadline, notificationHref, notificationPhotoUrl, notificationPreview } from '@/lib/notification-navigation';
+import type {Notification,Product,Entitlement,Member,Ticket,TicketMessage} from '@/lib/types';
 import { Avatar,Button,Panel,Loading,Empty,Badge,Failure } from './ui';
 function useGet<T>(path:string) {const [data,setData]=useState<T|null>(null);const [loading,setLoading]=useState(true);const[error,setError]=useState('');const refresh=async()=>{setLoading(true);setError('');try{setData(await request<T>('GET',path))}catch(e){setError(messageOf(e))}finally{setLoading(false)}};useEffect(()=>{void refresh()},[path]);return {data,loading,error,refresh}}
+
+function relativeTime(iso?: string) {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms)) return '';
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return 'Just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return new Date(iso).toLocaleString();
+}
+
+type NotifFilter = 'all' | 'unread' | 'read';
+type NotifTypeFilter = 'ALL' | 'NEW_MESSAGE' | 'NEW_MATCH' | 'NEW_LIKE' | 'VERIFICATION_RESULT' | 'SYSTEM';
+
 export function Notifications(){
   const {notify}=useApp();
-  const router=useRouter();
-  const {refreshInboxUnread,soundMuted,setSoundMuted}=useMessages();
-  const {data,loading,error,refresh}=useGet<{items:Notification[]}>('/notifications?limit=50');
+  const searchParams=useSearchParams();
+  const focusId=searchParams.get('focus');
+  const {refreshInboxUnread,soundMuted,setSoundMuted,openNotificationDestination}=useMessages();
+  const [items,setItems]=useState<Notification[]>([]);
+  const [nextCursor,setNextCursor]=useState<string|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [loadingMore,setLoadingMore]=useState(false);
+  const [error,setError]=useState('');
+  const [filter,setFilter]=useState<NotifFilter>('all');
+  const [typeFilter,setTypeFilter]=useState<NotifTypeFilter>('ALL');
+  const [busyAll,setBusyAll]=useState(false);
   const prefs=useGet<Record<string,boolean>>('/notification-preferences');
-  const change=async(key:string,v:boolean)=>{try{await request('PATCH','/notification-preferences',{body:{[key]:v}});void prefs.refresh()}catch(e){notify(messageOf(e))}};
-  const openNotification=async(n:Notification)=>{
+
+  const load=useCallback(async(cursor?:string|null)=>{
+    const isMore=Boolean(cursor);
+    if(isMore)setLoadingMore(true);else{setLoading(true);setError('');}
     try{
-      if(!n.readAt && !n.isRead){
-        await request('POST',`/notifications/${n.id}/read`);
-        void refresh();
-        void refreshInboxUnread();
-      }
-    }catch(e){notify(messageOf(e))}
-    const conversationId=n.data?.conversationId;
-    if(n.type==='NEW_MESSAGE' && conversationId){
-      router.push(`/messages/${encodeURIComponent(conversationId)}`);
-      return;
-    }
-    if(n.type==='NEW_MATCH' && n.data?.matchId){
-      router.push('/matches');
-    }
+      const qs=cursor?`?limit=30&cursor=${encodeURIComponent(cursor)}`:'?limit=30';
+      const page=await request<{items:Notification[];nextCursor?:string|null}>('GET',`/notifications${qs}`);
+      setItems((prev)=>isMore?[...prev,...(page.items||[])]:(page.items||[]));
+      setNextCursor(page.nextCursor||null);
+    }catch(e){setError(messageOf(e))}
+    finally{if(isMore)setLoadingMore(false);else setLoading(false)}
+  },[]);
+
+  useEffect(()=>{void load()},[load]);
+  useEffect(()=>{
+    const onFocus=()=>{if(document.visibilityState==='visible')void refreshInboxUnread()};
+    document.addEventListener('visibilitychange',onFocus);
+    return()=>document.removeEventListener('visibilitychange',onFocus);
+  },[refreshInboxUnread]);
+
+  const change=async(key:string,v:boolean)=>{try{await request('PATCH','/notification-preferences',{body:{[key]:v}});void prefs.refresh()}catch(e){notify(messageOf(e))}};
+
+  const openNotification=async(n:Notification)=>{
+    await openNotificationDestination(n);
+    setItems((prev)=>prev.map((row)=>row.id===n.id?{...row,readAt:row.readAt||new Date().toISOString(),isRead:true}:row));
+    void refreshInboxUnread();
   };
-  return <div><Heading label="STAY IN THE LOOP" title="Notifications" description="Never miss a connection."/><div className="two-panel"><Panel title="Your notifications" subtitle="All the latest updates in one place.">{loading?<Loading/>:error?<p className="field-error">{error}</p>:data?.items?.length?data.items.map(n=><button key={n.id} className={`notification-row ${!n.isRead&&!n.readAt?'unread':''}`} onClick={()=>void openNotification(n)}><span className="notification-icon"><BellRing size={18}/></span><span><strong>{n.title||n.type||'Notification'}</strong><small>{n.body||n.message||''}</small><small>{n.createdAt?new Date(n.createdAt).toLocaleString():''}</small></span>{!n.isRead&&!n.readAt&&<span className="notification-dot"/>}</button>):<Empty title="All caught up" detail="Your notifications will appear here."/>}</Panel>
- <Panel title="Notification preferences" subtitle="Choose which updates to receive.">{prefs.loading?<Loading/>:['newMatches','messages','likes','promotions'].map(k=><label key={k} className="setting-row"><span><strong>{({newMatches:'New matches',messages:'Messages',likes:'Likes',promotions:'Offers and updates'} as Record<string,string>)[k]}</strong></span><input type="checkbox" checked={Boolean(prefs.data?.[k])} onChange={e=>void change(k,e.target.checked)} disabled={!prefs.data}/></label>)}
- <label className="setting-row"><span><strong>Message sounds (this browser)</strong></span><input type="checkbox" checked={!soundMuted} onChange={e=>setSoundMuted(!e.target.checked)}/></label>
- </Panel></div></div>
+
+  const markAll=async()=>{
+    setBusyAll(true);
+    try{
+      await request('POST','/notifications/read-all');
+      setItems((prev)=>prev.map((n)=>({...n,readAt:n.readAt||new Date().toISOString(),isRead:true})));
+      void refreshInboxUnread();
+      notify('All notifications marked as read.');
+    }catch(e){notify(messageOf(e))}
+    finally{setBusyAll(false)}
+  };
+
+  const visible=useMemo(()=>{
+    return items.filter((n)=>{
+      const unread=!n.readAt&&!n.isRead;
+      if(filter==='unread'&&!unread)return false;
+      if(filter==='read'&&unread)return false;
+      if(typeFilter!=='ALL'&&n.type!==typeFilter)return false;
+      return true;
+    });
+  },[items,filter,typeFilter]);
+
+  useEffect(()=>{
+    if(!focusId||!items.length)return;
+    const el=document.getElementById(`notif-${focusId}`);
+    el?.scrollIntoView({behavior:'smooth',block:'center'});
+  },[focusId,items]);
+
+  return <div><Heading label="STAY IN THE LOOP" title="Notifications" description="Never miss a connection."/>
+    <div className="two-panel">
+      <Panel title="Your notifications" subtitle="All the latest updates in one place."
+        aside={<Button tone="outline" disabled={busyAll||!items.some(n=>!n.readAt&&!n.isRead)} onClick={()=>void markAll()}>{busyAll?'Updating…':'Mark all read'}</Button>}>
+        <div className="section-tabs" style={{marginBottom:12}}>
+          {(['all','unread','read'] as NotifFilter[]).map((f)=>(
+            <button key={f} type="button" className={filter===f?'current':''} onClick={()=>setFilter(f)}>{f==='all'?'All':f==='unread'?'Unread':'Read'}</button>
+          ))}
+        </div>
+        <label className="setting-row" style={{marginBottom:12}}>
+          <span><strong>Type</strong></span>
+          <select value={typeFilter} onChange={(e)=>setTypeFilter(e.target.value as NotifTypeFilter)}>
+            <option value="ALL">All types</option>
+            <option value="NEW_MESSAGE">Messages</option>
+            <option value="NEW_MATCH">Matches</option>
+            <option value="NEW_LIKE">Likes</option>
+            <option value="VERIFICATION_RESULT">Verification</option>
+            <option value="SYSTEM">System</option>
+          </select>
+        </label>
+        {loading?<Loading/>:error?<Failure error={error} retry={()=>void load()}/>:visible.length?<>
+          {visible.map((n)=>{
+            const unread=!n.isRead&&!n.readAt;
+            const photo=notificationPhotoUrl(n);
+            return (
+              <button
+                id={`notif-${n.id}`}
+                key={n.id}
+                type="button"
+                className={`notification-row ${unread?'unread':''} ${focusId===n.id?'notification-row-focus':''}`}
+                onClick={()=>void openNotification(n)}
+              >
+                <span className="notification-icon">
+                  {photo
+                    ? <Avatar user={{displayName:notificationHeadline(n),photos:[{url:mediaUrl(photo)}]}} size={40}/>
+                    : <BellRing size={18}/>}
+                </span>
+                <span>
+                  <strong>{notificationHeadline(n)}</strong>
+                  <small>{notificationPreview(n)}</small>
+                  <small title={n.createdAt?new Date(n.createdAt).toLocaleString():''}>{relativeTime(n.createdAt)}{n.type?` · ${n.type.replace(/_/g,' ')}`:''}</small>
+                </span>
+                {unread&&<span className="notification-dot"/>}
+              </button>
+            );
+          })}
+          {nextCursor&&filter==='all'&&typeFilter==='ALL'&&(
+            <Button tone="outline" className="full" disabled={loadingMore} onClick={()=>void load(nextCursor)}>{loadingMore?'Loading…':'Load more'}</Button>
+          )}
+        </>:<Empty title={filter==='unread'?'No unread notifications':'All caught up'} detail="Your notifications will appear here."/>}
+      </Panel>
+      <Panel title="Notification preferences" subtitle="Choose which updates to receive.">{prefs.loading?<Loading/>:['newMatches','messages','likes','promotions'].map(k=><label key={k} className="setting-row"><span><strong>{({newMatches:'New matches',messages:'Messages',likes:'Likes',promotions:'Offers and updates'} as Record<string,string>)[k]}</strong></span><input type="checkbox" checked={Boolean(prefs.data?.[k])} onChange={e=>void change(k,e.target.checked)} disabled={!prefs.data}/></label>)}
+        <label className="setting-row"><span><strong>Message sounds (this browser)</strong></span><input type="checkbox" checked={!soundMuted} onChange={e=>setSoundMuted(!e.target.checked)}/></label>
+      </Panel>
+    </div>
+  </div>;
 }
 export function Premium(){
   const {notify}=useApp();
@@ -97,12 +214,152 @@ export function Premium(){
     </Panel>
   </div>;
 }
-export function Help(){const {notify}=useApp();const faqs=useGet<{items:{id?:string;question:string;answer:string}[]}>('/support/faqs');const [category,setCategory]=useState('ACCOUNT');const[subject,setSubject]=useState('');const[body,setBody]=useState('');const [sending,setSending]=useState(false);const[tickets,setTickets]=useState<Ticket[]>([]);const{session}=useApp();
- useEffect(()=>{if(!session)return;let keys:string[]=[];try{keys=JSON.parse(localStorage.getItem(`dating_tickets_${session.userId}`)||'[]')}catch{};void Promise.all(keys.map(id=>request<Ticket>('GET',`/support/tickets/${id}`).catch(()=>null))).then(rows=>setTickets(rows.filter((x):x is Ticket=>Boolean(x))))},[session?.userId]);
- const send=async()=>{setSending(true);try{const t=await request<Ticket>('POST','/support/tickets',{body:{category,subject,message:body}});notify('Support ticket created.');if(session){const k=`dating_tickets_${session.userId}`;let ids:string[]=[];try{ids=JSON.parse(localStorage.getItem(k)||'[]')}catch{};localStorage.setItem(k,JSON.stringify([t.id,...ids].slice(0,25)))}setTickets(p=>[t,...p]);setBody('');setSubject('')}catch(e){notify(messageOf(e))}finally{setSending(false)}};
- return <div><Heading label="WE'RE HERE TO HELP" title="Help & support" description="Need something? Let's sort it out."/><div className="two-panel"><Panel title="Frequently asked questions" subtitle="Quick answers to common questions.">{faqs.loading?<Loading/>:faqs.data?.items.map((faq,i)=><details key={faq.id||i} className="faq"><summary>{faq.question}</summary><p>{faq.answer}</p></details>)}{!faqs.loading&&!faqs.data?.items?.length&&<Empty title="No FAQs yet" detail="Please submit a ticket for help."/>}</Panel>
- <Panel title="Contact support" subtitle="Tell us what happened and we'll help."><div className="stack"><label>Category<select value={category} onChange={e=>setCategory(e.target.value)}>{['ACCOUNT','BILLING','SAFETY','BUG','OTHER'].map(v=><option key={v}>{v}</option>)}</select></label><label>Subject<input minLength={3} maxLength={120} value={subject} onChange={e=>setSubject(e.target.value)} placeholder="What's going on?"/></label><label>Message<textarea minLength={10} maxLength={5000} value={body} onChange={e=>setBody(e.target.value)} placeholder="Tell us more..."/></label><Button disabled={sending||subject.trim().length<3||body.trim().length<10} onClick={()=>void send()}>Send support request</Button></div></Panel></div>
- <Panel title="Your tickets" subtitle="Tickets sent from this browser.">{tickets.length?tickets.map(t=><div key={t.id} className="ticket-row"><div><strong>{t.subject}</strong><p className="muted">{t.category} · {new Date(t.createdAt).toLocaleDateString()}</p></div><Badge>{t.status}</Badge><details><summary>Read updates</summary>{t.messages?.map((m,i)=><p key={i}>{m.author}: {m.body}</p>)}</details></div>):<Empty title="No tickets" detail="Your support requests will appear here after you submit one."/>}</Panel></div>
+export function Help(){
+  const {notify,session}=useApp();
+  const searchParams=useSearchParams();
+  const router=useRouter();
+  const ticketParam=searchParams.get('ticket');
+  const faqs=useGet<{items:{id?:string;question:string;answer:string}[]}>('/support/faqs');
+  const [category,setCategory]=useState('ACCOUNT');
+  const [subject,setSubject]=useState('');
+  const [body,setBody]=useState('');
+  const [sending,setSending]=useState(false);
+  const [tickets,setTickets]=useState<Ticket[]>([]);
+  const [ticketsLoading,setTicketsLoading]=useState(false);
+  const [ticketsError,setTicketsError]=useState('');
+  const [activeId,setActiveId]=useState<string|null>(ticketParam);
+  const [detail,setDetail]=useState<Ticket|null>(null);
+  const [detailLoading,setDetailLoading]=useState(false);
+  const [detailError,setDetailError]=useState('');
+  const [reply,setReply]=useState('');
+  const [replying,setReplying]=useState(false);
+
+  const loadTickets=useCallback(async()=>{
+    if(!session){setTickets([]);return}
+    setTicketsLoading(true);setTicketsError('');
+    try{
+      const page=await request<{items:Ticket[]}>('GET','/support/tickets?limit=50');
+      setTickets(page.items||[]);
+    }catch(e){setTicketsError(messageOf(e))}
+    finally{setTicketsLoading(false)}
+  },[session]);
+
+  const loadDetail=useCallback(async(id:string)=>{
+    setDetailLoading(true);setDetailError('');
+    try{
+      const t=await request<Ticket>('GET',`/support/tickets/${encodeURIComponent(id)}`);
+      setDetail(t);
+      setActiveId(id);
+    }catch(e){
+      setDetail(null);
+      setDetailError(messageOf(e));
+    }finally{setDetailLoading(false)}
+  },[]);
+
+  useEffect(()=>{void loadTickets()},[loadTickets]);
+  useEffect(()=>{
+    if(ticketParam){
+      setActiveId(ticketParam);
+      void loadDetail(ticketParam);
+    }
+  },[ticketParam,loadDetail]);
+
+  const openTicket=(id:string)=>{
+    setActiveId(id);
+    const params=new URLSearchParams(searchParams.toString());
+    params.set('ticket',id);
+    router.replace(`/help?${params.toString()}`,{scroll:false});
+    void loadDetail(id);
+  };
+
+  const send=async()=>{
+    setSending(true);
+    try{
+      const t=await request<Ticket>('POST','/support/tickets',{body:{category,subject,message:body}});
+      notify('Support ticket created.');
+      setBody('');setSubject('');
+      await loadTickets();
+      openTicket(t.id);
+    }catch(e){notify(messageOf(e))}
+    finally{setSending(false)}
+  };
+
+  const sendReply=async()=>{
+    if(!activeId||!reply.trim()||replying)return;
+    setReplying(true);
+    try{
+      const updated=await request<Ticket>('POST',`/support/tickets/${encodeURIComponent(activeId)}/messages`,{body:{body:reply.trim()}});
+      setDetail(updated);
+      setReply('');
+      notify('Reply sent.');
+      void loadTickets();
+    }catch(e){notify(messageOf(e))}
+    finally{setReplying(false)}
+  };
+
+  const closed=detail?.status==='CLOSED';
+
+  return <div>
+    <Heading label="WE'RE HERE TO HELP" title="Help & support" description="Need something? Let's sort it out."/>
+    <div className="two-panel">
+      <Panel title="Frequently asked questions" subtitle="Quick answers to common questions.">
+        {faqs.loading?<Loading/>:faqs.data?.items.map((faq,i)=><details key={faq.id||i} className="faq"><summary>{faq.question}</summary><p>{faq.answer}</p></details>)}
+        {!faqs.loading&&!faqs.data?.items?.length&&<Empty title="No FAQs yet" detail="Please submit a ticket for help."/>}
+      </Panel>
+      <Panel title="Contact support" subtitle="Tell us what happened and we'll help.">
+        <div className="stack">
+          <label>Category<select value={category} onChange={e=>setCategory(e.target.value)}>{['ACCOUNT','BILLING','SAFETY','BUG','OTHER'].map(v=><option key={v}>{v}</option>)}</select></label>
+          <label>Subject<input minLength={3} maxLength={120} value={subject} onChange={e=>setSubject(e.target.value)} placeholder="What's going on?"/></label>
+          <label>Message<textarea minLength={10} maxLength={5000} value={body} onChange={e=>setBody(e.target.value)} placeholder="Tell us more..."/></label>
+          <Button disabled={sending||subject.trim().length<3||body.trim().length<10} onClick={()=>void send()}>{sending?'Sending…':'Send support request'}</Button>
+        </div>
+      </Panel>
+    </div>
+    <Panel title="Your tickets" subtitle="Requests linked to your account.">
+      {ticketsLoading?<Loading/>:ticketsError?<Failure error={ticketsError} retry={()=>void loadTickets()}/>:tickets.length?(
+        <div className="two-panel" style={{marginTop:8}}>
+          <div className="stack">
+            {tickets.map((t)=>(
+              <button key={t.id} type="button" className={`ticket-row ${activeId===t.id?'ticket-row-active':''}`} onClick={()=>openTicket(t.id)}>
+                <div>
+                  <strong>{t.subject}</strong>
+                  <p className="muted">{t.category} · {new Date(t.createdAt).toLocaleDateString()}{t.lastMessagePreview?` · ${t.lastMessagePreview}`:''}</p>
+                </div>
+                <Badge>{t.status}</Badge>
+              </button>
+            ))}
+          </div>
+          <div>
+            {detailLoading?<Loading/>:detailError?<Failure error={detailError} retry={()=>activeId&&void loadDetail(activeId)}/>:detail?(
+              <div className="stack">
+                <div className="ticket-row" style={{cursor:'default'}}>
+                  <div><strong>{detail.subject}</strong><p className="muted">{detail.category} · {detail.status}</p></div>
+                  <Badge>{detail.status}</Badge>
+                </div>
+                <div className="ticket-thread">
+                  {(detail.messages||[]).map((m:TicketMessage,i:number)=>(
+                    <div key={m.id||i} className={`ticket-bubble ${m.author==='STAFF'?'ticket-bubble-staff':'ticket-bubble-user'}`}>
+                      <strong>{m.author==='STAFF'?'Support team':'You'}</strong>
+                      <p>{m.body}</p>
+                      {m.createdAt&&<small>{new Date(m.createdAt).toLocaleString()}</small>}
+                    </div>
+                  ))}
+                </div>
+                {closed?(
+                  <p className="muted">This ticket is closed. Open a new request if you still need help.</p>
+                ):(
+                  <div className="stack">
+                    <label>Reply<textarea maxLength={5000} value={reply} onChange={e=>setReply(e.target.value)} placeholder="Write a follow-up message..." rows={4}/></label>
+                    <Button disabled={replying||reply.trim().length<1} onClick={()=>void sendReply()}>{replying?'Sending…':'Send reply'}</Button>
+                  </div>
+                )}
+              </div>
+            ):<Empty title="Select a ticket" detail="Choose a request to read the conversation."/>}
+          </div>
+        </div>
+      ):<Empty title="No tickets" detail="Your support requests will appear here after you submit one."/>}
+    </Panel>
+  </div>;
 }
 type LoginActivityEntry={id:string;ipAddress?:string|null;country?:string|null;state?:string|null;city?:string|null;deviceName:string;deviceType:string;browser:string;operatingSystem:string;loginAt:string};
 type LoginActivityPage={items:LoginActivityEntry[];nextCursor?:string|null};

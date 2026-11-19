@@ -6,7 +6,7 @@ import {
   Check, CheckCheck, Heart, Phone, Video, Plus, Gift, Smile, Trash2, ChevronDown, Paperclip,
   X, Copy, Sparkles, User,
 } from 'lucide-react';
-import { io, Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import { request, upload, uid, mediaUrl, messageOf } from '@/lib/api';
 import type { Conversation, ChatMessage, ChatCallLog, StoreItem, StoreWallet } from '@/lib/types';
 import { Avatar, Button, Empty, Failure, Loading, Modal } from './ui';
@@ -192,7 +192,7 @@ function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
 
 export function Chat({ go }: { go: (p: string) => void }) {
   const { session, notify } = useApp();
-  const { activeCall, callConnected, startCall: placeCall } = useCall();
+  const { activeCall, callConnected, callSocket, startCall: placeCall } = useCall();
   const { setActiveConversationId, markConversationRead, refreshUnreadFromServer } = useMessages();
   const pathname = usePathname();
   const query = useSearchParams();
@@ -411,22 +411,24 @@ export function Chat({ go }: { go: (p: string) => void }) {
     if (selected) void open(selected);
   }, [selected, open]);
 
+  // Reuse CallProvider's authenticated socket — do not open a second Socket.IO connection.
   useEffect(() => {
-    if (!session?.userId || !session.accessToken) return;
+    if (!session?.userId || !callSocket) {
+      socketRef.current = null;
+      setLiveStatus('connecting');
+      return;
+    }
     const userId = session.userId;
-    const origin = process.env.NEXT_PUBLIC_SOCKET_ORIGIN || 'http://127.0.0.1:5050';
-    everConnected.current = false;
-    setLiveStatus('connecting');
-    const socket = io(`${origin.replace(/\/$/, '')}/v1`, {
-      transports: ['websocket'],
-      autoConnect: true,
-      auth: { token: tokenRef.current || session.accessToken },
-      reconnectionAttempts: 8,
-      reconnectionDelay: 800,
-      reconnectionDelayMax: 5000,
-    });
+    const socket = callSocket;
     socketRef.current = socket;
-    socket.on('connect', () => {
+    if (socket.connected) {
+      everConnected.current = true;
+      setLiveStatus('online');
+    } else {
+      setLiveStatus(everConnected.current ? 'offline' : 'connecting');
+    }
+
+    const onConnect = () => {
       everConnected.current = true;
       setLiveStatus('online');
       void loadRef.current(false);
@@ -438,19 +440,19 @@ export function Chat({ go }: { go: (p: string) => void }) {
           })
           .catch(() => {});
       }
-    });
-    socket.on('disconnect', () => {
+    };
+    const onDisconnect = () => {
       setLiveStatus(everConnected.current ? 'offline' : 'connecting');
-    });
-    socket.on('connect_error', (e) => {
+    };
+    const onConnectError = (e: Error) => {
       setLiveStatus(everConnected.current ? 'offline' : 'connecting');
       if (e.message !== 'websocket error') notifyRef.current(`Live chat: ${e.message}`);
-    });
-    socket.on('session:expired', () => {
+    };
+    const onSessionExpired = () => {
       setLiveStatus('offline');
       notifyRef.current('Live session expired. Reload to reconnect with a refreshed token.');
-    });
-    socket.on('message:new', ({ message }: { message: ChatMessage }) => {
+    };
+    const onMessageNew = ({ message }: { message: ChatMessage }) => {
       if (selectedRef.current === message.conversationId) {
         setMessages((current) => mergeMessages(current, [message]));
         if (!stickToBottom.current && message.senderId !== userId) {
@@ -460,12 +462,10 @@ export function Chat({ go }: { go: (p: string) => void }) {
           socket.emit('message:read', { conversationId: message.conversationId, upToMessageId: message.id });
         }
       }
-      // Reload list so a previously "Delete chat"'d thread reappears without a page refresh.
       void (async () => {
         const items = await loadRef.current(false);
         void refreshUnreadRef.current();
         if (items.some((conversation) => conversation.id === message.conversationId)) return;
-        // Fallback when list reload raced ahead of the recipient un-hide.
         try {
           const summary = await request<Conversation>(
             'GET',
@@ -479,8 +479,8 @@ export function Chat({ go }: { go: (p: string) => void }) {
           /* still hidden for this viewer, or transient error */
         }
       })();
-    });
-    socket.on('message:read', () => {
+    };
+    const onMessageRead = () => {
       const id = selectedRef.current;
       if (id) {
         void request<{ items: ChatMessage[] }>('GET', `/conversations/${encodeURIComponent(id)}/messages?limit=50`)
@@ -489,32 +489,32 @@ export function Chat({ go }: { go: (p: string) => void }) {
           })
           .catch(() => {});
       }
-    });
-    socket.on('message:deleted', ({ conversationId, messageId }: { conversationId: string; messageId: string }) => {
+    };
+    const onMessageDeleted = ({ conversationId, messageId }: { conversationId: string; messageId: string }) => {
       if (selectedRef.current === conversationId) {
         setMessages((current) => current.filter((message) => message.id !== messageId));
       }
       void loadRef.current(false);
-    });
-    socket.on('message:unsent', ({ conversationId, message }: { conversationId: string; message: ChatMessage }) => {
+    };
+    const onMessageUnsent = ({ conversationId, message }: { conversationId: string; message: ChatMessage }) => {
       if (selectedRef.current === conversationId) {
         setMessages((current) => mergeMessages(current, [message]));
       }
       void loadRef.current(false);
-    });
-    socket.on('conversation:deleted', ({ conversationId }: { conversationId: string }) => {
+    };
+    const onConversationDeleted = ({ conversationId }: { conversationId: string }) => {
       setConversations((current) => current.filter((conversation) => conversation.id !== conversationId));
       if (selectedRef.current === conversationId) {
         setSelected(null);
         goRef.current('/messages');
       }
-    });
-    socket.on('typing', ({ conversationId, isTyping }: { conversationId: string; isTyping: boolean }) => {
+    };
+    const onTyping = ({ conversationId, isTyping }: { conversationId: string; isTyping: boolean }) => {
       if (conversationId !== selectedRef.current) return;
       if (typingTimer.current) clearTimeout(typingTimer.current);
       setTyping(isTyping);
       if (isTyping) typingTimer.current = setTimeout(() => setTyping(false), 4000);
-    });
+    };
     const onPresenceUpdate = (payload: PresencePayload) => {
       if (!payload?.userId) return;
       setConversations((current) => applyPeerPresence(current, {
@@ -523,21 +523,66 @@ export function Chat({ go }: { go: (p: string) => void }) {
         lastSeenAt: payload.lastSeenAt ?? null,
       }));
     };
-    socket.on('presence:update', onPresenceUpdate);
-    socket.on('user:online', (payload: { userId: string; lastSeenAt?: string | null }) => {
+    const onUserOnline = (payload: { userId: string; lastSeenAt?: string | null }) => {
       onPresenceUpdate({ userId: payload.userId, isOnline: true, lastSeenAt: null });
-    });
-    socket.on('user:offline', (payload: { userId: string; lastSeenAt?: string | null }) => {
+    };
+    const onUserOffline = (payload: { userId: string; lastSeenAt?: string | null }) => {
       onPresenceUpdate({ userId: payload.userId, isOnline: false, lastSeenAt: payload.lastSeenAt ?? null });
-    });
-    socket.on('match:new', () => void loadRef.current(false));
-    socket.on('match:removed', () => void loadRef.current(false));
+    };
+    const onMatchNew = () => void loadRef.current(false);
+    const onMatchRemoved = () => void loadRef.current(false);
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect_error', onConnectError);
+    socket.on('session:expired', onSessionExpired);
+    socket.on('message:new', onMessageNew);
+    socket.on('message:read', onMessageRead);
+    socket.on('message:deleted', onMessageDeleted);
+    socket.on('message:unsent', onMessageUnsent);
+    socket.on('conversation:deleted', onConversationDeleted);
+    socket.on('typing', onTyping);
+    socket.on('presence:update', onPresenceUpdate);
+    socket.on('user:online', onUserOnline);
+    socket.on('user:offline', onUserOffline);
+    socket.on('match:new', onMatchNew);
+    socket.on('match:removed', onMatchRemoved);
+
+    if (socket.connected) onConnect();
+
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onConnectError);
+      socket.off('session:expired', onSessionExpired);
+      socket.off('message:new', onMessageNew);
+      socket.off('message:read', onMessageRead);
+      socket.off('message:deleted', onMessageDeleted);
+      socket.off('message:unsent', onMessageUnsent);
+      socket.off('conversation:deleted', onConversationDeleted);
+      socket.off('typing', onTyping);
+      socket.off('presence:update', onPresenceUpdate);
+      socket.off('user:online', onUserOnline);
+      socket.off('user:offline', onUserOffline);
+      socket.off('match:new', onMatchNew);
+      socket.off('match:removed', onMatchRemoved);
+      if (socketRef.current === socket) socketRef.current = null;
       if (typingTimer.current) clearTimeout(typingTimer.current);
     };
-  }, [session?.userId]);
+  }, [session?.userId, callSocket]);
+
+  useEffect(() => {
+    if (!session?.userId) {
+      setLiveStatus('connecting');
+      return;
+    }
+    if (callConnected) {
+      everConnected.current = true;
+      setLiveStatus('online');
+    } else {
+      setLiveStatus(everConnected.current ? 'offline' : 'connecting');
+    }
+  }, [callConnected, session?.userId]);
 
   useEffect(() => {
     if (msgLoading) return;
