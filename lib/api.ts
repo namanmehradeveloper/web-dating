@@ -155,4 +155,4 @@ export function mediaUrl(url?: string) {
 }
 
 export const uid = () => crypto.randomUUID();
-export const messageOf = (e: unknown) => e instanceof ApiFailure ? `${e.message}${e.status === 429 ? ' Please try again after the rate limit resets.' : ''}` : e instanceof Error ? e.message : 'Something went wrong.';
+export const messageOf = (e: unknown) => e instanceof ApiFailure ? e.message : e instanceof Error ? e.message : 'Something went wrong.';
