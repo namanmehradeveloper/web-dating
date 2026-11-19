@@ -224,6 +224,7 @@ export function Help(){
   const [subject,setSubject]=useState('');
   const [body,setBody]=useState('');
   const [sending,setSending]=useState(false);
+  const [createKey,setCreateKey]=useState(()=>crypto.randomUUID());
   const [tickets,setTickets]=useState<Ticket[]>([]);
   const [ticketsLoading,setTicketsLoading]=useState(false);
   const [ticketsError,setTicketsError]=useState('');
@@ -233,6 +234,7 @@ export function Help(){
   const [detailError,setDetailError]=useState('');
   const [reply,setReply]=useState('');
   const [replying,setReplying]=useState(false);
+  const [replyKey,setReplyKey]=useState(()=>crypto.randomUUID());
 
   const loadTickets=useCallback(async()=>{
     if(!session){setTickets([]);return}
@@ -266,6 +268,8 @@ export function Help(){
 
   const openTicket=(id:string)=>{
     setActiveId(id);
+    setReply('');
+    setReplyKey(crypto.randomUUID());
     const params=new URLSearchParams(searchParams.toString());
     params.set('ticket',id);
     router.replace(`/help?${params.toString()}`,{scroll:false});
@@ -273,11 +277,17 @@ export function Help(){
   };
 
   const send=async()=>{
+    if(sending)return;
     setSending(true);
     try{
-      const t=await request<Ticket>('POST','/support/tickets',{body:{category,subject,message:body}});
+      const t=await request<Ticket>('POST','/support/tickets',{
+        body:{category,subject,message:body},
+        idempotencyKey:createKey,
+      });
       notify('Support ticket created.');
-      setBody('');setSubject('');
+      setBody('');
+      setSubject('');
+      setCreateKey(crypto.randomUUID());
       await loadTickets();
       openTicket(t.id);
     }catch(e){notify(messageOf(e))}
@@ -288,9 +298,13 @@ export function Help(){
     if(!activeId||!reply.trim()||replying)return;
     setReplying(true);
     try{
-      const updated=await request<Ticket>('POST',`/support/tickets/${encodeURIComponent(activeId)}/messages`,{body:{body:reply.trim()}});
+      const updated=await request<Ticket>('POST',`/support/tickets/${encodeURIComponent(activeId)}/messages`,{
+        body:{body:reply.trim()},
+        idempotencyKey:replyKey,
+      });
       setDetail(updated);
       setReply('');
+      setReplyKey(crypto.randomUUID());
       notify('Reply sent.');
       void loadTickets();
     }catch(e){notify(messageOf(e))}

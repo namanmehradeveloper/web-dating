@@ -15,9 +15,11 @@ export function ContactPage(){
   const [busy,setBusy]=useState(false);
   const [success,setSuccess]=useState(false);
   const [error,setError]=useState('');
+  const [idempotencyKey,setIdempotencyKey]=useState(()=>crypto.randomUUID());
 
   async function submit(e:React.FormEvent){
     e.preventDefault();
+    if(busy)return;
     setError('');
     setSuccess(false);
     if(name.trim().length<1){
@@ -42,10 +44,12 @@ export function ContactPage(){
           subject:subject.trim(),
           message:body.trim(),
         },
+        idempotencyKey,
       });
       setSuccess(true);
       setSubject('');
       setBody('');
+      setIdempotencyKey(crypto.randomUUID());
       notify(session?'Your support ticket has been created.':'Your message was sent. Our team will reply by email.');
     }catch(e){
       setError(messageOf(e));
