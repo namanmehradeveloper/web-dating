@@ -215,14 +215,17 @@ export function Premium(){
   </div>;
 }
 export function Help(){
-  const {notify,session}=useApp();
+  const {notify,session,me}=useApp();
   const searchParams=useSearchParams();
   const router=useRouter();
   const ticketParam=searchParams.get('ticket');
   const faqs=useGet<{items:{id?:string;question:string;answer:string}[]}>('/support/faqs');
+  const [name,setName]=useState('');
+  const [email,setEmail]=useState('');
   const [category,setCategory]=useState('ACCOUNT');
   const [subject,setSubject]=useState('');
   const [body,setBody]=useState('');
+  const [formError,setFormError]=useState('');
   const [sending,setSending]=useState(false);
   const [createKey,setCreateKey]=useState(()=>crypto.randomUUID());
   const [tickets,setTickets]=useState<Ticket[]>([]);
@@ -235,6 +238,12 @@ export function Help(){
   const [reply,setReply]=useState('');
   const [replying,setReplying]=useState(false);
   const [replyKey,setReplyKey]=useState(()=>crypto.randomUUID());
+
+  useEffect(()=>{
+    if(!me)return;
+    setName(current=>current||me.displayName||'');
+    setEmail(current=>current||me.email||'');
+  },[me?.displayName,me?.email]);
 
   const loadTickets=useCallback(async()=>{
     if(!session){setTickets([]);return}
@@ -278,19 +287,47 @@ export function Help(){
 
   const send=async()=>{
     if(sending)return;
+    setFormError('');
+    const trimmedName=name.trim();
+    const trimmedEmail=email.trim();
+    const trimmedSubject=subject.trim();
+    const trimmedBody=body.trim();
+    if(trimmedName.length<1){
+      setFormError('Enter your name.');
+      return;
+    }
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmedEmail)){
+      setFormError('Enter a valid email address.');
+      return;
+    }
+    if(trimmedSubject.length<3||trimmedBody.length<10){
+      setFormError('Enter a subject and a message of at least 10 characters.');
+      return;
+    }
     setSending(true);
     try{
       const t=await request<Ticket>('POST','/support/tickets',{
-        body:{category,subject,message:body},
+        body:{
+          name:trimmedName,
+          email:trimmedEmail,
+          category,
+          subject:trimmedSubject,
+          message:trimmedBody,
+        },
         idempotencyKey:createKey,
       });
       notify('Support ticket created.');
       setBody('');
       setSubject('');
+      setFormError('');
       setCreateKey(crypto.randomUUID());
       await loadTickets();
       openTicket(t.id);
-    }catch(e){notify(messageOf(e))}
+    }catch(e){
+      const msg=messageOf(e);
+      setFormError(msg);
+      notify(msg);
+    }
     finally{setSending(false)}
   };
 
@@ -322,10 +359,13 @@ export function Help(){
       </Panel>
       <Panel title="Contact support" subtitle="Tell us what happened and we'll help.">
         <div className="stack">
+          <label>Your name<input required maxLength={80} value={name} onChange={e=>{setName(e.target.value);setFormError('')}} placeholder="Your name"/></label>
+          <label>Email address<input required type="email" maxLength={120} value={email} onChange={e=>{setEmail(e.target.value);setFormError('')}} placeholder="you@example.com"/></label>
           <label>Category<select value={category} onChange={e=>setCategory(e.target.value)}>{['ACCOUNT','BILLING','SAFETY','BUG','OTHER'].map(v=><option key={v}>{v}</option>)}</select></label>
-          <label>Subject<input minLength={3} maxLength={120} value={subject} onChange={e=>setSubject(e.target.value)} placeholder="What's going on?"/></label>
-          <label>Message<textarea minLength={10} maxLength={5000} value={body} onChange={e=>setBody(e.target.value)} placeholder="Tell us more..."/></label>
-          <Button disabled={sending||subject.trim().length<3||body.trim().length<10} onClick={()=>void send()}>{sending?'Sending…':'Send support request'}</Button>
+          <label>Subject<input minLength={3} maxLength={120} value={subject} onChange={e=>{setSubject(e.target.value);setFormError('')}} placeholder="What's going on?"/></label>
+          <label>Message<textarea minLength={10} maxLength={5000} value={body} onChange={e=>{setBody(e.target.value);setFormError('')}} placeholder="Tell us more..."/></label>
+          {formError?<p className="field-error" role="alert">{formError}</p>:null}
+          <Button disabled={sending||name.trim().length<1||!email.trim()||subject.trim().length<3||body.trim().length<10} onClick={()=>void send()}>{sending?'Sending…':'Send support request'}</Button>
         </div>
       </Panel>
     </div>
