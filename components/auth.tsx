@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import {useSearchParams} from 'next/navigation';
-import { isAdultDateOfBirth } from '@/lib/validation';
+import { isAdultDateOfBirth, maxAdultDateOfBirth } from '@/lib/validation';
 import { Heart, ShieldCheck, Sparkles, ArrowRight, Mail, Phone, LockKeyhole, CheckCircle2 } from 'lucide-react';
 import { request, messageOf } from '@/lib/api';
 import { useApp } from './provider';
@@ -133,7 +133,7 @@ export function Auth({initialMode='phone'}:{initialMode?:FormMode}) {
         {mode==='otp' && <div className="auth-actions"><button type="button" onClick={()=>setMode('phone')}>Change number</button><button type="button" disabled={busy||resend>0} onClick={()=>void sendOtp()}>{resend>0?`Resend in ${resend}s`:'Resend code'}</button></div>}
       </form>}
       {(mode==='email'||mode==='register') && <form onSubmit={e=>{e.preventDefault();void emailSubmit()}}>
-        {mode==='register' && <><label>Your name</label><input required maxLength={40} value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Full name"/><label>Date of birth</label><input required type="date" value={dob} onChange={e=>setDob(e.target.value)}/></>}
+        {mode==='register' && <><label>Your name</label><input required maxLength={40} value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Full name"/><label>Date of birth</label><input required type="date" max={maxAdultDateOfBirth()} value={dob} onChange={e=>{const next=e.target.value;if(next&&next>maxAdultDateOfBirth())return;setDob(next)}}/></>}
         <label>Email address</label><div className="input-with-icon"><Mail size={18}/><input type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/></div>
         <label>Password</label><div className="input-with-icon"><LockKeyhole size={18}/><input type="password" required minLength={mode==='register'?10:1} value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter password"/></div>
         {mode==='register' && <label className="check-row"><input type="checkbox" checked={terms} onChange={e=>setTerms(e.target.checked)}/> I accept the <a href="/terms" target="_blank" rel="noreferrer">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></label>}

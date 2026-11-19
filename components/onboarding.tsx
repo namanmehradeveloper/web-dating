@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { isAdultDateOfBirth } from '@/lib/validation';
+import { isAdultDateOfBirth, maxAdultDateOfBirth } from '@/lib/validation';
 import { Heart, ArrowRight, Camera, CheckCircle2, ChevronLeft, Sparkles } from 'lucide-react';
 import { useApp } from './provider';
 import { request, upload, messageOf } from '@/lib/api';
@@ -29,7 +29,7 @@ export function Onboarding() {
   <p className="muted">{['Start with the basics so others can get to know you.','Find people who share your interests.','Add 2–6 clear profile photos.','One final step before discovering connections.'][step]}</p>
   {error&&<p className="field-error">{error}</p>}
   {step===0&&<div className="form-grid"><label className="wide">Your name<input value={name} maxLength={40} onChange={e=>setName(e.target.value)} placeholder="Your display name"/></label>
-    <label>Date of birth<input type="date" value={dob} onChange={e=>setDob(e.target.value)}/></label><label>I identify as<select value={gender} onChange={e=>setGender(e.target.value)}><option value="WOMAN">Woman</option><option value="MAN">Man</option><option value="NON_BINARY">Non-binary</option></select></label>
+    <label>Date of birth<input type="date" required max={maxAdultDateOfBirth()} value={dob} onChange={e=>{const next=e.target.value;if(next&&next>maxAdultDateOfBirth())return;setDob(next)}}/></label><label>Gender<select value={gender} onChange={e=>setGender(e.target.value)}><option value="WOMAN">Woman</option><option value="MAN">Man</option><option value="NON_BINARY">Non-binary</option></select></label>
     <label className="wide">Short bio (optional)<textarea maxLength={500} value={bio} onChange={e=>setBio(e.target.value)} placeholder="I love long conversations, weekend adventures..."/></label></div>}
   {step===1&&<div className="interest-grid">{catalog.map(item=><button key={item.id} className={`interest ${interests.includes(item.id)?'chosen':''}`} onClick={()=>setInterests(s=>s.includes(item.id)?s.filter(i=>i!==item.id):s.length<10?[...s,item.id]:s)}>{item.label}{interests.includes(item.id)&&<CheckCircle2 size={15}/>}</button>)}{catalog.length===0&&<Loading label="Loading interests..."/>}</div>}
   {step===2&&<><label className="upload-drop"><Camera size={27}/><strong>Add your photos</strong><span>JPG, PNG or WebP · 2–6 images · up to 10 MB each</span><input type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={e=>{const selected=Array.from(e.target.files||[]);if(selected.length>6){setError('Upload no more than 6 photos.');return;}if(selected.some(f=>f.size>10*1024*1024||!['image/jpeg','image/png','image/webp'].includes(f.type))){setError('Use JPG, PNG or WebP files, each no larger than 10 MB.');return;}setFiles(selected);setError('')}}/></label><div className="photos-preview">{files.map((f,i)=><div key={i}><PhotoPreview file={f} alt={`Your photo ${i+1}`}/><span>{i===0?'Main photo':`Photo ${i+1}`}</span></div>)}</div></>}
