@@ -3,7 +3,7 @@ import { useCallback,useEffect,useMemo,useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BellRing, Crown, ShieldCheck, Ban, LogOut, AlertTriangle, Shield, ChevronRight, MapPin, Monitor, UserRound, Database, LifeBuoy, Mail, Phone } from 'lucide-react';
+import { BellRing, Crown, ShieldCheck, Ban, LogOut, AlertTriangle, Shield, ChevronRight, MapPin, Monitor, UserRound, Database, LifeBuoy, Mail, Phone, CirclePlay } from 'lucide-react';
 import { useApp } from './provider';
 import { useMessages } from './message-provider';
 import { request,messageOf,mediaUrl } from '@/lib/api';
@@ -282,15 +282,26 @@ export function Premium(){
     <div className="premium-hero"><Crown size={32}/><span>ENJOY MORE CONNECTIONS</span><h2>Love the possibilities.</h2>
       <p>{billing?.configured?`Payments run through the ${billing.provider||'configured'} provider. Demo charges are simulated and never real money.`:'Billing is not configured on this server yet.'}</p>
     </div>
-    <div className="plan-grid">{plans.isPending&&!plans.data?<Loading/>:plans.isError?<p className="field-error">{messageOf(plans.error)}</p>:plans.data?.items.map(p=>
-      <section key={p.id} className="price-card"><Crown size={23}/><h2>{p.title}</h2><p>{p.description}</p>
+    <div className="plan-grid">{plans.isPending&&!plans.data?<Loading/>:plans.isError?<p className="field-error">{messageOf(plans.error)}</p>:plans.data?.items.map(p=>{
+      const yearly=String(p.period||'').toUpperCase()==='YEARLY'||/year/i.test(p.title||'');
+      const title=yearly?'Yearly Plus':'Monthly Plus';
+      const description=yearly
+        ?'Get all the benefits of Plus for a full year, with greater value and uninterrupted access.'
+        :'Enjoy unlimited likes, discover who\'s interested in you, and undo your last swipe.';
+      return (
+      <section key={p.id} className="price-card"><Crown size={23}/><h2>{title}</h2><p>{description}</p>
         <h3>{p.priceLabel||'See store price'}<small>{p.period?` / ${p.period.toLowerCase()}`:''}</small></h3>
-        {billing?.configured&&billing.provider==='demo'?<div className="stack">
-          <Button disabled={Boolean(busyId)} className="full" onClick={()=>void buy(p.id,'SUCCESS')}>{busyId===`${p.id}:SUCCESS`?'Activating…':'Simulate successful purchase'}</Button>
-          <Button tone="outline" disabled={Boolean(busyId)} className="full" onClick={()=>void buy(p.id,'FAILURE')}>{busyId===`${p.id}:FAILURE`?'Simulating…':'Simulate failed purchase'}</Button>
-        </div>:<Button disabled className="full">Purchases unavailable</Button>}
+        {billing?.configured&&billing.provider==='demo'?<div className="price-card-actions">
+          <Button disabled={Boolean(busyId)} className="price-card-btn price-card-btn-primary" onClick={()=>void buy(p.id,'SUCCESS')}>
+            <Crown size={15}/>{busyId===`${p.id}:SUCCESS`?'Activating…':'Activate Plus'}
+          </Button>
+          <Button tone="outline" disabled={Boolean(busyId)} className="price-card-btn price-card-btn-outline" onClick={()=>void buy(p.id,'FAILURE')}>
+            <CirclePlay size={15}/>{busyId===`${p.id}:FAILURE`?'Simulating…':'Try Demo Purchase'}
+          </Button>
+        </div>:<Button disabled>Purchases unavailable</Button>}
       </section>
-    )}</div>
+      );
+    })}</div>
     <div className="notice-line"><Shield size={20}/><div>
       <strong>Current membership: {entitlement.data?.tier||'Free'}{isPlus?' · Active':''}</strong>
       <p>{isPlus?`Renews: ${entitlement.data?.willRenew?'yes':'no'}${entitlement.data?.expiresAt?` · Expires ${new Date(entitlement.data.expiresAt).toLocaleString()}`:''}${entitlement.data?.provider?` · Provider ${entitlement.data.provider}`:''}${entitlement.data?.environment==='demo'?' · DEMO':''}`:'Choose a plan above to unlock unlimited likes, see who likes you, and undo.'}</p>
