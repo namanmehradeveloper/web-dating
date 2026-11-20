@@ -162,7 +162,7 @@ body:has(.dc-member){background:linear-gradient(180deg,#fff9f9,#fff 400px)}
 .dc-matches .match-cards{grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:23px}
 .dc-matches .person-tile{overflow:hidden;border-radius:22px;transition:transform .22s,box-shadow .22s}
 .dc-matches .person-tile:hover{transform:translateY(-6px);box-shadow:0 25px 48px #51303a21}
-.dc-matches .portrait-placeholder{aspect-ratio:4/4.3;height:auto;min-height:250px;background:linear-gradient(135deg,#ffe6ec,#f9c3d0)}.dc-matches .portrait-placeholder img{width:100%;height:100%;object-fit:cover}
+.dc-matches .portrait-placeholder{aspect-ratio:auto;height:140px;min-height:0;max-height:140px;background:linear-gradient(135deg,#ffe6ec,#f9c3d0)}.dc-matches .portrait-placeholder img{width:100%;height:100%;object-fit:cover}
 .dc-matches .person-details{padding:18px}.dc-matches .person-actions{display:flex;gap:9px;margin-top:17px}.dc-matches .person-actions .button.primary{flex:1}
 .dc-matches .person-details strong{color:var(--v2-ink)}
 /* Messages */
