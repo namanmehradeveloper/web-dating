@@ -11,6 +11,7 @@ import {
 
 const Lottie = lazy(() => import('lottie-react').then((m) => ({ default: m.Lottie })));
 import { ApiFailure, mediaUrl, messageOf, request } from '@/lib/api';
+import { getStoreCatalog } from '@/lib/store-catalog-cache';
 import type { StoreItem, StoreWallet } from '@/lib/types';
 import {
   BEAUTY_PRESETS, BackgroundBlurEngine, DEFAULT_BEAUTY, buildBeautyCssFilter,
@@ -179,10 +180,15 @@ export function CallOverlay({
     if (fxTimer.current) clearTimeout(fxTimer.current);
   }, []);
 
-  const refreshStore = useCallback(async () => {
+  const refreshStore = useCallback(async (opts?: { walletOnly?: boolean }) => {
     try {
+      if (opts?.walletOnly) {
+        const wal = await request<StoreWallet>('GET', '/store/wallet');
+        setWallet(wal);
+        return;
+      }
       const [cat, wal] = await Promise.all([
-        request<{ gifts: StoreItem[] }>('GET', '/store/catalog'),
+        getStoreCatalog(),
         request<StoreWallet>('GET', '/store/wallet'),
       ]);
       const list = cat.gifts || [];

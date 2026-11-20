@@ -1,12 +1,17 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Heart, MapPin, ShieldCheck, Flag, Ban, Briefcase,
   Sparkles, Star, MessageCircle, ChevronLeft, ChevronRight,
   Maximize2, X, Share2, Compass, Check
 } from 'lucide-react';
 import { request, mediaUrl, messageOf, uid } from '@/lib/api';
+import { fetchMatches, fetchProfileById } from '@/lib/query/fetchers';
+import { invalidateAfterBlockChange, invalidateAfterSwipeOrMatch } from '@/lib/query/invalidation';
+import { queryKeys } from '@/lib/query/keys';
+import { cachePolicies } from '@/lib/query/policies';
 import type { Member, Match } from '@/lib/types';
 import { Button, Loading, Failure, Modal, Avatar } from './ui';
 import { useApp } from './provider';
@@ -17,48 +22,37 @@ interface MemberDetailProps {
 }
 
 export function MemberDetail({ id, go }: MemberDetailProps) {
-  const { toast, confirmAction } = useApp();
-  const [person, setPerson] = useState<Member | null>(null);
-  const [error, setError] = useState('');
+  const { toast, confirmAction, session } = useApp();
+  const queryClient = useQueryClient();
+  const userId = session?.userId || '';
   const [busy, setBusy] = useState(false);
   const [photoIndex, setPhotoIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reason, setReason] = useState('FAKE_PROFILE');
   const [details, setDetails] = useState('');
-  const [existingMatch, setExistingMatch] = useState<Match | null>(null);
   const [matchedData, setMatchedData] = useState<{ conversationId?: string } | null>(null);
   const [liked, setLiked] = useState(false);
 
-  // Fetch Member Profile
-  useEffect(() => {
-    let active = true;
-    request<Member>('GET', `/profiles/${encodeURIComponent(id)}`)
-      .then((p) => {
-        if (active) setPerson(p);
-      })
-      .catch((e) => {
-        if (active) setError(messageOf(e));
-      });
-    return () => {
-      active = false;
-    };
-  }, [id]);
+  const profileQuery = useQuery({
+    queryKey: queryKeys.profile.byId(userId || '__none__', id),
+    queryFn: () => fetchProfileById(id),
+    enabled: Boolean(userId && id),
+    staleTime: cachePolicies.profileById.staleTime,
+    gcTime: cachePolicies.profileById.gcTime,
+  });
 
-  // Check if current user is already matched with this member
-  useEffect(() => {
-    let active = true;
-    request<{ items: Match[] }>('GET', '/matches?limit=50')
-      .then((res) => {
-        if (!active) return;
-        const match = (res.items || []).find((m) => m.otherUser?.id === id);
-        if (match) setExistingMatch(match);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [id]);
+  const matchesQuery = useQuery({
+    queryKey: queryKeys.matches.list(userId || '__none__'),
+    queryFn: fetchMatches,
+    enabled: Boolean(userId),
+    staleTime: cachePolicies.matches.staleTime,
+    gcTime: cachePolicies.matches.gcTime,
+  });
+
+  const person = profileQuery.data || null;
+  const error = profileQuery.isError ? messageOf(profileQuery.error) : '';
+  const existingMatch = (matchesQuery.data?.items || []).find((m) => m.otherUser?.id === id) || null;
 
   // Handle keyboard navigation for photos
   useEffect(() => {
@@ -105,6 +99,7 @@ export function MemberDetail({ id, go }: MemberDetailProps) {
       } else {
         toast.success(action === 'SUPER_LIKE' ? 'Super like sent! ⭐' : 'Like sent! 💗');
       }
+      if (userId) invalidateAfterSwipeOrMatch(userId, queryClient);
     } catch (e) {
       toast.error(messageOf(e));
     } finally {
@@ -125,6 +120,7 @@ export function MemberDetail({ id, go }: MemberDetailProps) {
     try {
       await request('POST', `/users/${encodeURIComponent(id)}/block`);
       toast.success('Member blocked.');
+      if (userId) invalidateAfterBlockChange(userId, queryClient);
       go('/matches');
     } catch (e) {
       toast.error(messageOf(e));
@@ -141,6 +137,7 @@ export function MemberDetail({ id, go }: MemberDetailProps) {
       });
       toast.success('Report submitted.');
       setReportOpen(false);
+      if (userId) invalidateAfterBlockChange(userId, queryClient);
       go('/matches');
     } catch (e) {
       toast.error(messageOf(e));

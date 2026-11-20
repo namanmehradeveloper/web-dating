@@ -12,14 +12,23 @@ import {
 } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { MessageCircle, Volume2, VolumeX, X } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { mediaUrl, request } from '@/lib/api';
+import { getConversationsList } from '@/lib/conversations-cache';
+import {
+  fetchNotificationPreferences,
+  fetchNotificationUnreadCount,
+  fetchProfileById,
+} from '@/lib/query/fetchers';
+import { queryKeys } from '@/lib/query/keys';
+import { cachePolicies } from '@/lib/query/policies';
 import {
   notificationHeadline,
   notificationHref,
   notificationPhotoUrl,
   notificationPreview,
 } from '@/lib/notification-navigation';
-import type { ChatMessage, Conversation, Member, Notification as InboxNotification } from '@/lib/types';
+import type { ChatMessage, Notification as InboxNotification } from '@/lib/types';
 import { useApp } from './provider';
 import { useCall } from './call-provider';
 import { Avatar } from './ui';
@@ -111,9 +120,17 @@ function showBrowserMessageNotification(
   }
 }
 
-async function resolveSender(senderId: string): Promise<{ displayName: string; photoUrl?: string }> {
+async function resolveSender(
+  senderId: string,
+  viewerId: string,
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<{ displayName: string; photoUrl?: string }> {
   try {
-    const profile = await request<Member>('GET', `/profiles/${encodeURIComponent(senderId)}`);
+    const profile = await queryClient.fetchQuery({
+      queryKey: queryKeys.profile.byId(viewerId, senderId),
+      queryFn: () => fetchProfileById(senderId),
+      staleTime: cachePolicies.profileById.staleTime,
+    });
     const photo = profile.photos?.[0]?.url;
     return {
       displayName: profile.displayName || 'Dating Cloud member',
@@ -126,17 +143,36 @@ async function resolveSender(senderId: string): Promise<{ displayName: string; p
 
 export function MessageProvider({ children }: { children: ReactNode }) {
   const { session } = useApp();
+  const queryClient = useQueryClient();
   const { callSocket, callConnected } = useCall();
   const router = useRouter();
   const pathname = usePathname();
+  const userId = session?.userId;
 
   const [unreadByConversation, setUnreadByConversation] = useState<Record<string, number>>({});
-  const [inboxUnread, setInboxUnread] = useState(0);
   const [soundMuted, setSoundMutedState] = useState(false);
   const [activeConversationId, setActiveConversationIdState] = useState<string | null>(null);
   const [toast, setToast] = useState<MessageToast | null>(null);
-  const [notificationPrefs, setNotificationPrefs] = useState<Record<string, boolean> | null>(null);
-  const [notificationPrefsLoading, setNotificationPrefsLoading] = useState(false);
+
+  const unreadQuery = useQuery({
+    queryKey: queryKeys.notifications.unreadCount(userId || '__none__'),
+    queryFn: fetchNotificationUnreadCount,
+    enabled: Boolean(userId),
+    staleTime: cachePolicies.notificationUnread.staleTime,
+    gcTime: cachePolicies.notificationUnread.gcTime,
+  });
+
+  const prefsQuery = useQuery({
+    queryKey: queryKeys.notifications.preferences(userId || '__none__'),
+    queryFn: fetchNotificationPreferences,
+    enabled: Boolean(userId),
+    staleTime: cachePolicies.notificationPrefs.staleTime,
+    gcTime: cachePolicies.notificationPrefs.gcTime,
+  });
+
+  const inboxUnread = typeof unreadQuery.data?.count === 'number' ? unreadQuery.data.count : 0;
+  const notificationPrefs = prefsQuery.data ?? null;
+  const notificationPrefsLoading = prefsQuery.isPending && !prefsQuery.data;
 
   const activeConversationIdRef = useRef<string | null>(null);
   const toastRef = useRef<MessageToast | null>(null);
@@ -269,6 +305,12 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     try {
       if (!notification.readAt && !notification.isRead && notification.id) {
         await request('POST', `/notifications/${encodeURIComponent(notification.id)}/read`);
+        if (userId) {
+          queryClient.setQueryData<{ count: number }>(
+            queryKeys.notifications.unreadCount(userId),
+            (prev) => ({ count: Math.max(0, (prev?.count ?? 1) - 1) }),
+          );
+        }
         void refreshInboxUnreadRef.current?.();
       }
     } catch {
@@ -276,7 +318,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     }
     clearToast();
     router.push(href);
-  }, [clearToast, router]);
+  }, [clearToast, router, userId, queryClient]);
 
   const showToast = useCallback((next: MessageToast) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -297,11 +339,12 @@ export function MessageProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Full conversation list sync — only for session start / reconnect / structural chat changes.
-  // Incoming messages update badges locally to avoid GET /conversations?limit=50 on every message.
+  // Shares GET /conversations with Chat via conversations-cache (inflight + short TTL).
+  // Incoming messages update badges locally to avoid a list refetch on every message.
   const refreshUnreadFromServer = useCallback(async () => {
     if (!session?.userId) return;
     try {
-      const data = await request<{ items: Conversation[] }>('GET', '/conversations?limit=50');
+      const data = await getConversationsList();
       const map: Record<string, number> = {};
       for (const c of data.items || []) {
         if (c.unreadCount > 0) map[c.id] = c.unreadCount;
@@ -313,39 +356,44 @@ export function MessageProvider({ children }: { children: ReactNode }) {
   }, [session?.userId]);
 
   const refreshInboxUnread = useCallback(async () => {
-    if (!session?.userId) return;
+    if (!userId) return;
     try {
-      const data = await request<{ count: number }>('GET', '/notifications/unread-count');
-      setInboxUnread(typeof data.count === 'number' ? data.count : 0);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.notifications.unreadCount(userId) });
+      await queryClient.refetchQueries({ queryKey: queryKeys.notifications.unreadCount(userId) });
     } catch {
       /* keep last known */
     }
-  }, [session?.userId]);
+  }, [userId, queryClient]);
 
   const refreshNotificationPrefs = useCallback(async () => {
-    if (!session?.userId) return;
-    setNotificationPrefsLoading(true);
+    if (!userId) return;
     try {
-      const prefs = await request<Record<string, boolean>>('GET', '/notification-preferences');
-      setNotificationPrefs(prefs);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.notifications.preferences(userId) });
+      const prefs = await queryClient.fetchQuery({
+        queryKey: queryKeys.notifications.preferences(userId),
+        queryFn: fetchNotificationPreferences,
+        staleTime: cachePolicies.notificationPrefs.staleTime,
+      });
       messagesPrefEnabledRef.current = prefs.messages !== false;
     } catch {
       messagesPrefEnabledRef.current = true;
-    } finally {
-      setNotificationPrefsLoading(false);
     }
-  }, [session?.userId]);
+  }, [userId, queryClient]);
+
+  useEffect(() => {
+    if (notificationPrefs) {
+      messagesPrefEnabledRef.current = notificationPrefs.messages !== false;
+    }
+  }, [notificationPrefs]);
 
   useEffect(() => {
     refreshInboxUnreadRef.current = refreshInboxUnread;
   }, [refreshInboxUnread]);
 
-  // Load prefs + unread when signed in (once per user — not on every navigation).
+  // Load conversation badges when signed in (prefs/unread come from TanStack Query).
   useEffect(() => {
     if (!session?.userId) {
       setUnreadByConversation({});
-      setInboxUnread(0);
-      setNotificationPrefs(null);
       setToast(null);
       notifiedMessageIds.current.clear();
       notifiedInboxIds.current.clear();
@@ -354,9 +402,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
       return;
     }
     void refreshUnreadFromServer();
-    void refreshInboxUnread();
-    void refreshNotificationPrefs();
-  }, [session?.userId, refreshUnreadFromServer, refreshInboxUnread, refreshNotificationPrefs, setActiveConversationId]);
+  }, [session?.userId, refreshUnreadFromServer, setActiveConversationId]);
 
   const handleIncomingMessage = useCallback(async (message: ChatMessage, viewerId: string) => {
     if (!message?.id || !message.conversationId) return;
@@ -415,7 +461,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     // Inbox badge is for notification rows; message toasts do not require unread-count refetch.
 
     if (!cached) {
-      const sender = await resolveSender(message.senderId);
+      const sender = await resolveSender(message.senderId, viewerId, queryClient);
       senderCache.current.set(message.senderId, sender);
       setToast((current) => (
         current?.messageId === message.id
@@ -423,7 +469,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
           : current
       ));
     }
-  }, [openHref, playSound, showToast]);
+  }, [openHref, playSound, showToast, queryClient]);
 
   const handleInboxNotification = useCallback((notification: InboxNotification) => {
     if (!notification?.id) return;

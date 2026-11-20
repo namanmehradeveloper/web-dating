@@ -7,7 +7,17 @@ import {
   X, Copy, Sparkles, User,
 } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
+import { useQueryClient } from '@tanstack/react-query';
 import { request, upload, uid, mediaUrl, messageOf } from '@/lib/api';
+import { readDraft, writeDraft } from '@/lib/chat-drafts';
+import { getStoreCatalog } from '@/lib/store-catalog-cache';
+import {
+  invalidateAfterBlockChange,
+  invalidateAfterGiftSend,
+  invalidateAfterSwipeOrMatch,
+} from '@/lib/query/invalidation';
+import { useConversationsQuery } from '@/lib/query/hooks';
+import { queryKeys } from '@/lib/query/keys';
 import type { Conversation, ChatMessage, ChatCallLog, StoreItem, StoreWallet } from '@/lib/types';
 import { Avatar, Button, Empty, Failure, Loading, Modal } from './ui';
 import { useApp } from './provider';
@@ -30,35 +40,38 @@ const ICEBREAKER_PROMPTS = [
   "🎵 What's one song you currently have on repeat?",
   "🍕 Quick question: Best food or hangout spot in town?",
 ];
-const DRAFT_PREFIX = 'dc-msg-draft:';
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
 type ListFilter = 'all' | 'unread' | 'favourites' | 'online';
 
 type PresencePayload = { userId: string; isOnline: boolean; lastSeenAt?: string | null };
 
-function draftKey(conversationId: string) {
-  return `${DRAFT_PREFIX}${conversationId}`;
-}
+type ReadReceiptPayload = {
+  conversationId: string;
+  readerId?: string;
+  upToMessageId?: string;
+  readAt?: string | Date;
+};
 
-function readDraft(conversationId: string | null) {
-  if (!conversationId || typeof window === 'undefined') return '';
-  try {
-    return sessionStorage.getItem(draftKey(conversationId)) || '';
-  } catch {
-    return '';
-  }
-}
+/** Apply socket message:read locally — messages the reader received up to upToMessageId become READ. */
+function applyReadReceipt(messages: ChatMessage[], payload: ReadReceiptPayload): ChatMessage[] {
+  const { readerId, upToMessageId } = payload;
+  if (!readerId || !upToMessageId || !messages.length) return messages;
 
-function writeDraft(conversationId: string | null, value: string) {
-  if (!conversationId || typeof window === 'undefined') return;
-  try {
-    const key = draftKey(conversationId);
-    if (value) sessionStorage.setItem(key, value);
-    else sessionStorage.removeItem(key);
-  } catch {
-    /* ignore quota / private mode */
-  }
+  const upTo = messages.find((message) => message.id === upToMessageId);
+  // Without the cutoff message in the loaded window we cannot apply sentAt safely.
+  if (!upTo) return messages;
+  const cutoff = Date.parse(upTo.sentAt);
+
+  let changed = false;
+  const next = messages.map((message) => {
+    if (message.senderId === readerId) return message;
+    if (message.status === 'UNSENT' || message.status === 'READ' || message.status === 'SEEN') return message;
+    if (Date.parse(message.sentAt) > cutoff) return message;
+    changed = true;
+    return { ...message, status: 'READ' };
+  });
+  return changed ? next : messages;
 }
 
 function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]) {
@@ -192,13 +205,20 @@ function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
 
 export function Chat({ go }: { go: (p: string) => void }) {
   const { session, toast, confirmAction } = useApp();
+  const queryClient = useQueryClient();
   const { activeCall, callConnected, callSocket, startCall: placeCall } = useCall();
   const { setActiveConversationId, markConversationRead } = useMessages();
   const pathname = usePathname();
   const query = useSearchParams();
   const pathConversation = pathname.match(/^\/messages\/([^/?#]+)/)?.[1] || null;
   const requestedConversation = pathConversation || query.get('conversation') || null;
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const {
+    conversations,
+    setConversations,
+    loading: conversationsLoading,
+    error: conversationsError,
+    refresh: refreshConversations,
+  } = useConversationsQuery(session?.userId);
   const [selected, setSelected] = useState<string | null>(requestedConversation);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState('');
@@ -213,10 +233,10 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const [storeCatalog, setStoreCatalog] = useState<{ gifts: StoreItem[]; emojiPacks: StoreItem[] } | null>(null);
   const [storeWallet, setStoreWallet] = useState<StoreWallet | null>(null);
   const [storeLoading, setStoreLoading] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [msgLoading, setMsgLoading] = useState(false);
-  const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
+  const loading = conversationsLoading;
+  const error = conversationsError ? messageOf(conversationsError) : '';
   /** connecting = first join; online = live; offline = dropped after a successful connect */
   const [liveStatus, setLiveStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
   const [typing, setTyping] = useState(false);
@@ -358,29 +378,15 @@ export function Chat({ go }: { go: (p: string) => void }) {
   }, [text, selected, resizeComposer]);
 
   const load = useCallback(async (showLoader = true) => {
-    if (showLoader) {
-      setLoading(true);
-      setError('');
-    }
     try {
-      const d = await request<{ items: Conversation[] }>('GET', '/conversations?limit=50');
-      const items = d.items || [];
-      setConversations(items);
-      setError('');
-      return items;
-    } catch (e) {
-      if (showLoader) setError(messageOf(e));
+      // Quiet socket refreshes force a network round-trip; initial mount reuses TanStack cache.
+      return await refreshConversations(!showLoader);
+    } catch {
       return [] as Conversation[];
-    } finally {
-      if (showLoader) setLoading(false);
     }
-  }, []);
+  }, [refreshConversations]);
 
   useEffect(() => { loadRef.current = load; }, [load]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   const open = useCallback(async (id: string) => {
     const seq = ++messageRequestSeq.current;
@@ -478,15 +484,15 @@ export function Chat({ go }: { go: (p: string) => void }) {
         }
       })();
     };
-    const onMessageRead = () => {
-      const id = selectedRef.current;
-      if (id) {
-        void request<{ items: ChatMessage[] }>('GET', `/conversations/${encodeURIComponent(id)}/messages?limit=50`)
-          .then((d) => {
-            if (selectedRef.current === id) setMessages((current) => mergeMessages(current, d.items || []));
-          })
-          .catch(() => {});
-      }
+    const onMessageRead = (payload: ReadReceiptPayload) => {
+      if (!payload?.conversationId || selectedRef.current !== payload.conversationId) return;
+      setMessages((current) => applyReadReceipt(current, payload));
+      setConversations((current) => current.map((conversation) => {
+        if (conversation.id !== payload.conversationId || !conversation.lastMessage) return conversation;
+        const updatedLast = applyReadReceipt([conversation.lastMessage], payload)[0];
+        if (updatedLast === conversation.lastMessage) return conversation;
+        return { ...conversation, lastMessage: updatedLast };
+      }));
     };
     const onMessageDeleted = ({ conversationId, messageId }: { conversationId: string; messageId: string }) => {
       if (selectedRef.current === conversationId) {
@@ -629,9 +635,16 @@ export function Chat({ go }: { go: (p: string) => void }) {
     setGiftOpen(true);
     setStoreLoading(true);
     try {
+      const userId = session?.userId;
       const [cat, wal] = await Promise.all([
-        request<{ gifts: StoreItem[]; emojiPacks: StoreItem[] }>('GET', '/store/catalog'),
-        request<StoreWallet>('GET', '/store/wallet'),
+        getStoreCatalog(),
+        userId
+          ? queryClient.fetchQuery({
+              queryKey: queryKeys.store.wallet(userId),
+              queryFn: () => request<StoreWallet>('GET', '/store/wallet'),
+              staleTime: 0,
+            })
+          : request<StoreWallet>('GET', '/store/wallet'),
       ]);
       setStoreCatalog({ gifts: cat.gifts || [], emojiPacks: cat.emojiPacks || [] });
       setStoreWallet(wal);
@@ -693,14 +706,35 @@ export function Chat({ go }: { go: (p: string) => void }) {
     await postChatMessage(body, id);
   };
 
+  const refreshGiftWallet = async () => {
+    try {
+      const userId = session?.userId;
+      if (userId) {
+        invalidateAfterGiftSend(userId, queryClient);
+        const wal = await queryClient.fetchQuery({
+          queryKey: queryKeys.store.wallet(userId),
+          queryFn: () => request<StoreWallet>('GET', '/store/wallet'),
+          staleTime: 0,
+        });
+        setStoreWallet(wal);
+      } else {
+        setStoreWallet(await request<StoreWallet>('GET', '/store/wallet'));
+      }
+    } catch {
+      /* keep last known balance */
+    }
+  };
+
   const sendGift = async (itemId: string) => {
     if (sending || !selected) return;
     await postChatMessage({ giftItemId: itemId }, uid());
+    await refreshGiftWallet();
   };
 
   const sendPaidEmoji = async (packId: string, emoji: string) => {
     if (sending || !selected) return;
     await postChatMessage({ paidEmoji: { packId, emoji } }, uid());
+    await refreshGiftWallet();
   };
 
   const reportAction = async () => {
@@ -732,6 +766,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
       setSelected(null);
       setOptions(false);
       toast.success('Member blocked');
+      if (session?.userId) invalidateAfterBlockChange(session.userId, queryClient);
       void load();
     } catch (e) {
       toast.error(messageOf(e));
@@ -752,6 +787,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
       setSelected(null);
       setOptions(false);
       toast.success('Unmatched');
+      if (session?.userId) invalidateAfterSwipeOrMatch(session.userId, queryClient);
       void load();
     } catch (e) {
       toast.error(messageOf(e));

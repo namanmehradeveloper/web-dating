@@ -1,7 +1,12 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Gift, Coins, Smile, Sparkles } from 'lucide-react';
 import { request, messageOf, mediaUrl } from '@/lib/api';
+import { fetchStoreCatalog, fetchStoreWallet } from '@/lib/query/fetchers';
+import { invalidateAfterStorePurchase } from '@/lib/query/invalidation';
+import { queryKeys } from '@/lib/query/keys';
+import { cachePolicies } from '@/lib/query/policies';
 import type { StoreItem, StoreWallet } from '@/lib/types';
 import { Button, Panel, Loading, Empty, Badge, Modal } from './ui';
 import { useApp } from './provider';
@@ -14,42 +19,44 @@ type PendingPurchase =
   | { kind: 'COINS'; item: StoreItem };
 
 export function Store() {
-  const { toast } = useApp();
+  const { toast, session } = useApp();
+  const queryClient = useQueryClient();
+  const userId = session?.userId || '';
   const [tab, setTab] = useState<Tab>('coins');
-  const [catalog, setCatalog] = useState<{ coinPacks: StoreItem[]; emojiPacks: StoreItem[]; gifts: StoreItem[] } | null>(null);
-  const [wallet, setWallet] = useState<StoreWallet | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
   const [pending, setPending] = useState<PendingPurchase | null>(null);
-  const hasCatalog = useRef(false);
 
-  const refresh = useCallback(async (opts?: { quiet?: boolean }) => {
-    const quiet = Boolean(opts?.quiet) && hasCatalog.current;
-    if (!quiet) {
-      setLoading(true);
-      setError('');
-    }
-    try {
-      const [cat, wal] = await Promise.all([
-        request<{ coinPacks: StoreItem[]; emojiPacks: StoreItem[]; gifts: StoreItem[] }>('GET', '/store/catalog'),
-        request<StoreWallet>('GET', '/store/wallet'),
-      ]);
-      setCatalog(cat);
-      setWallet(wal);
-      hasCatalog.current = true;
-      if (quiet) setError('');
-    } catch (e) {
-      if (!quiet) setError(messageOf(e));
-      else toast.error(messageOf(e));
-    } finally {
-      if (!quiet) setLoading(false);
-    }
-  }, [toast]);
+  const catalogQuery = useQuery({
+    queryKey: queryKeys.store.catalog(userId || 'anon'),
+    queryFn: fetchStoreCatalog,
+    enabled: Boolean(userId),
+    staleTime: cachePolicies.storeCatalog.staleTime,
+    gcTime: cachePolicies.storeCatalog.gcTime,
+  });
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const walletQuery = useQuery({
+    queryKey: queryKeys.store.wallet(userId || '__none__'),
+    queryFn: fetchStoreWallet,
+    enabled: Boolean(userId),
+    staleTime: cachePolicies.storeWallet.staleTime,
+    gcTime: cachePolicies.storeWallet.gcTime,
+  });
+
+  const catalog = catalogQuery.data || null;
+  const wallet = walletQuery.data || null;
+  const loading = (catalogQuery.isPending && !catalogQuery.data)
+    || (walletQuery.isPending && !walletQuery.data);
+  const error = catalogQuery.isError
+    ? messageOf(catalogQuery.error)
+    : walletQuery.isError
+      ? messageOf(walletQuery.error)
+      : '';
+
+  const refreshWallet = async () => {
+    if (!userId) return;
+    invalidateAfterStorePurchase(userId, queryClient);
+    await queryClient.refetchQueries({ queryKey: queryKeys.store.wallet(userId) });
+  };
 
   const buyCoins = async (itemId: string, outcome: 'SUCCESS' | 'FAILURE') => {
     setBusyId(`${itemId}:${outcome}`);
@@ -64,11 +71,11 @@ export function Store() {
       );
       if (result.purchase.status === 'SUCCEEDED') {
         toast.success(result.purchase.isDemo ? 'Demo coins added.' : 'Coins added.');
-        setWallet(result.wallet);
+        if (userId) queryClient.setQueryData(queryKeys.store.wallet(userId), result.wallet);
       } else {
         toast.error('Payment failed. No coins were added.');
       }
-      await refresh({ quiet: true });
+      await refreshWallet();
     } catch (e) {
       toast.error(messageOf(e));
     } finally {
@@ -82,9 +89,9 @@ export function Store() {
       const result = await request<{ wallet: StoreWallet }>('POST', '/store/buy-with-coins', {
         body: { itemId },
       });
-      setWallet(result.wallet);
+      if (userId) queryClient.setQueryData(queryKeys.store.wallet(userId), result.wallet);
       toast.success('Added to your inventory.');
-      await refresh({ quiet: true });
+      await refreshWallet();
     } catch (e) {
       toast.error(messageOf(e));
     } finally {

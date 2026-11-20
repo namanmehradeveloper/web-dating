@@ -1,6 +1,11 @@
 'use client';
 import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { configureSession, request, messageOf, http } from '@/lib/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { configureSession, messageOf, http } from '@/lib/api';
+import { clearAccountCaches } from '@/lib/query/invalidation';
+import { fetchProfileMe } from '@/lib/query/fetchers';
+import { queryKeys } from '@/lib/query/keys';
+import { cachePolicies } from '@/lib/query/policies';
 import type { Session, Member } from '@/lib/types';
 import { Button, Modal } from './ui';
 
@@ -69,9 +74,8 @@ function readStoredSession(): Session | null {
 }
 
 export function AppProvider({children}: {children: React.ReactNode}) {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState<Session | null>(null);
-  const [me, setMe] = useState<Member | null>(null);
-  const [meStatus, setMeStatus] = useState<MeStatus>('idle');
   const [ready, setReady] = useState(false);
   const [toastState, setToastState] = useState<AppToast | null>(null);
   const [confirmState, setConfirmState] = useState<(ConfirmOptions & { id: number }) | null>(null);
@@ -80,6 +84,7 @@ export function AppProvider({children}: {children: React.ReactNode}) {
   const toastSeq = useRef(0);
   const confirmSeq = useRef(0);
   const confirmResolver = useRef<((value: boolean) => void) | null>(null);
+  const meErrorToasted = useRef<unknown>(null);
 
   const clearToast = useCallback(() => {
     if (toastTimer.current) {
@@ -138,7 +143,9 @@ export function AppProvider({children}: {children: React.ReactNode}) {
 
   const assign = useCallback((value: Session | null) => {
     const previousUser = activeUser.current;
-    activeUser.current = value?.userId || null;
+    const nextUser = value?.userId || null;
+    const accountChanged = previousUser !== nextUser;
+    activeUser.current = nextUser;
     setSession(value);
     if (typeof window !== 'undefined') {
       if (value) localStorage.setItem(KEY, JSON.stringify(value));
@@ -146,63 +153,74 @@ export function AppProvider({children}: {children: React.ReactNode}) {
       // Clear any leftover per-tab copy from older builds.
       sessionStorage.removeItem(KEY);
     }
-    if (!value) {
-      setMe(null);
-      setMeStatus('idle');
-    } else if (value.userId !== previousUser) {
-      setMe(null);
-      setMeStatus('loading');
+    if (accountChanged) {
+      // Drop user-scoped caches so account switch cannot leak prior data.
+      clearAccountCaches(queryClient);
     }
-  }, []);
+  }, [queryClient]);
   useEffect(() => {
     const restored = readStoredSession();
     activeUser.current = restored?.userId || null;
     configureSession(restored, assign);
     setSession(restored);
-    if (restored) setMeStatus('loading');
     setReady(true);
   }, [assign]);
   // Keep other Member Web tabs in sync when login/logout/token refresh writes localStorage.
+  // Do not call assign() here — re-writing localStorage from a storage event can ping-pong across tabs.
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
       if (event.key !== KEY || event.storageArea !== localStorage) return;
       const next = parseSession(event.newValue);
       const previousUser = activeUser.current;
-      activeUser.current = next?.userId || null;
+      const nextUser = next?.userId || null;
+      const accountChanged = previousUser !== nextUser;
+      activeUser.current = nextUser;
       configureSession(next, assign);
       setSession(next);
-      if (!next) {
-        setMe(null);
-        setMeStatus('idle');
-      } else if (next.userId !== previousUser) {
-        setMe(null);
-        setMeStatus('loading');
-      }
+      if (accountChanged) clearAccountCaches(queryClient);
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [assign]);
+  }, [assign, queryClient]);
   useEffect(() => { configureSession(session, assign); }, [session, assign]);
-  const reloadMe = useCallback(async () => {
-    const expectedUser = session?.userId;
-    if (!expectedUser) return;
-    setMeStatus('loading');
-    try {
-      const profile = await request<Member>('GET', '/profile/me');
-      if (activeUser.current === expectedUser) {
-        setMe(profile);
-        setMeStatus('ready');
-      }
-    } catch (e) {
-      if (activeUser.current === expectedUser) {
-        setMe(null);
-        setMeStatus('error');
-        if ((e as { status?: number })?.status !== 401) toast.error(messageOf(e));
-      }
+
+  const userId = session?.userId;
+  const meQuery = useQuery({
+    queryKey: queryKeys.profile.me(userId || '__none__'),
+    queryFn: fetchProfileMe,
+    enabled: Boolean(ready && userId),
+    staleTime: cachePolicies.profileMe.staleTime,
+    gcTime: cachePolicies.profileMe.gcTime,
+  });
+
+  useEffect(() => {
+    if (!meQuery.isError || !meQuery.error) {
+      meErrorToasted.current = null;
+      return;
     }
-  }, [session?.userId, toast]);
-  // Single path for /profile/me — session restore and sign-in both land here (no duplicate fetch in signIn).
-  useEffect(() => { if (ready && session) void reloadMe(); }, [ready, session?.userId, reloadMe]);
+    if ((meQuery.error as { status?: number })?.status === 401) return;
+    if (meErrorToasted.current === meQuery.error) return;
+    meErrorToasted.current = meQuery.error;
+    toast.error(messageOf(meQuery.error));
+  }, [meQuery.isError, meQuery.error, toast]);
+
+  const me = userId && meQuery.data ? meQuery.data : null;
+  const meStatus: MeStatus = !userId
+    ? 'idle'
+    : meQuery.isPending && !meQuery.data
+      ? 'loading'
+      : meQuery.isError
+        ? 'error'
+        : meQuery.data
+          ? 'ready'
+          : 'loading';
+
+  const reloadMe = useCallback(async () => {
+    if (!userId) return;
+    await queryClient.invalidateQueries({ queryKey: queryKeys.profile.me(userId) });
+    await queryClient.refetchQueries({ queryKey: queryKeys.profile.me(userId) });
+  }, [userId, queryClient]);
+
   const signIn = async (value: Session) => {
     configureSession(value, assign);
     assign(value);

@@ -2,12 +2,28 @@
 import { useCallback,useEffect,useMemo,useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BellRing, Crown, ShieldCheck, Ban, LogOut, AlertTriangle, Shield, ChevronRight, MapPin, Monitor, UserRound, Database, LifeBuoy, Mail, Phone } from 'lucide-react';
 import { useApp } from './provider';
 import { useMessages } from './message-provider';
 import { request,messageOf,mediaUrl } from '@/lib/api';
+import {
+  fetchNotifications,
+  fetchSubscriptionEntitlement,
+  fetchSubscriptionHistory,
+  fetchSubscriptionProducts,
+  type NotificationsPage,
+} from '@/lib/query/fetchers';
+import {
+  invalidateAfterBlockChange,
+  invalidateAfterNotificationChange,
+  invalidateAfterSubscriptionChange,
+  invalidateNotificationPrefs,
+} from '@/lib/query/invalidation';
+import { queryKeys } from '@/lib/query/keys';
+import { cachePolicies } from '@/lib/query/policies';
 import { notificationHeadline, notificationHref, notificationPhotoUrl, notificationPreview } from '@/lib/notification-navigation';
-import type {Notification,Product,Entitlement,Member,Ticket,TicketMessage} from '@/lib/types';
+import type {Notification,Entitlement,Member,Ticket,TicketMessage} from '@/lib/types';
 import { Avatar,Button,Panel,Loading,Empty,Badge,Failure } from './ui';
 function useGet<T>(path:string) {const [data,setData]=useState<T|null>(null);const [loading,setLoading]=useState(true);const[error,setError]=useState('');const refresh=async()=>{setLoading(true);setError('');try{setData(await request<T>('GET',path))}catch(e){setError(messageOf(e))}finally{setLoading(false)}};useEffect(()=>{void refresh()},[path]);return {data,loading,error,refresh}}
 
@@ -30,7 +46,9 @@ type NotifFilter = 'all' | 'unread' | 'read';
 type NotifTypeFilter = 'ALL' | 'NEW_MESSAGE' | 'NEW_MATCH' | 'NEW_LIKE' | 'VERIFICATION_RESULT' | 'SYSTEM';
 
 export function Notifications(){
-  const {toast}=useApp();
+  const {toast,session}=useApp();
+  const queryClient=useQueryClient();
+  const userId=session?.userId||'';
   const searchParams=useSearchParams();
   const focusId=searchParams.get('focus');
   const {
@@ -42,28 +60,29 @@ export function Notifications(){
     notificationPrefsLoading,
     refreshNotificationPrefs,
   }=useMessages();
-  const [items,setItems]=useState<Notification[]>([]);
-  const [nextCursor,setNextCursor]=useState<string|null>(null);
-  const [loading,setLoading]=useState(true);
-  const [loadingMore,setLoadingMore]=useState(false);
-  const [error,setError]=useState('');
   const [filter,setFilter]=useState<NotifFilter>('all');
   const [typeFilter,setTypeFilter]=useState<NotifTypeFilter>('ALL');
   const [busyAll,setBusyAll]=useState(false);
 
-  const load=useCallback(async(cursor?:string|null)=>{
-    const isMore=Boolean(cursor);
-    if(isMore)setLoadingMore(true);else{setLoading(true);setError('');}
-    try{
-      const qs=cursor?`?limit=30&cursor=${encodeURIComponent(cursor)}`:'?limit=30';
-      const page=await request<{items:Notification[];nextCursor?:string|null}>('GET',`/notifications${qs}`);
-      setItems((prev)=>isMore?[...prev,...(page.items||[])]:(page.items||[]));
-      setNextCursor(page.nextCursor||null);
-    }catch(e){setError(messageOf(e))}
-    finally{if(isMore)setLoadingMore(false);else setLoading(false)}
-  },[]);
+  const listQuery=useInfiniteQuery({
+    queryKey: queryKeys.notifications.list(userId),
+    queryFn: ({pageParam}) => fetchNotifications(pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor || undefined,
+    enabled: Boolean(userId),
+    staleTime: cachePolicies.notifications.staleTime,
+    gcTime: cachePolicies.notifications.gcTime,
+  });
 
-  useEffect(()=>{void load()},[load]);
+  const items=useMemo(
+    () => (listQuery.data?.pages || []).flatMap((page) => page.items || []),
+    [listQuery.data],
+  );
+  const loading=listQuery.isPending && !listQuery.data;
+  const loadingMore=listQuery.isFetchingNextPage;
+  const error=listQuery.isError ? messageOf(listQuery.error) : '';
+  const hasMore=Boolean(listQuery.hasNextPage);
+
   useEffect(()=>{
     // One refresh when opening the notifications page (not on every global pathname change).
     void refreshInboxUnread();
@@ -78,13 +97,35 @@ export function Notifications(){
   const change=async(key:string,v:boolean)=>{
     try{
       await request('PATCH','/notification-preferences',{body:{[key]:v}});
+      if (userId) invalidateNotificationPrefs(userId, queryClient);
       await refreshNotificationPrefs();
     }catch(e){toast.error(messageOf(e))}
   };
 
+  const patchLocalRead=(ids:string[]|null)=>{
+    if (!userId) return;
+    queryClient.setQueryData(
+      queryKeys.notifications.list(userId),
+      (prev: { pages: NotificationsPage[]; pageParams: Array<string | null> } | undefined) => {
+        if (!prev) return prev;
+        const mark = (n: Notification) => {
+          if (ids && !ids.includes(n.id)) return n;
+          return { ...n, readAt: n.readAt || new Date().toISOString(), isRead: true };
+        };
+        return {
+          ...prev,
+          pages: prev.pages.map((page) => ({
+            ...page,
+            items: (page.items || []).map(mark),
+          })),
+        };
+      },
+    );
+  };
+
   const openNotification=async(n:Notification)=>{
     await openNotificationDestination(n);
-    setItems((prev)=>prev.map((row)=>row.id===n.id?{...row,readAt:row.readAt||new Date().toISOString(),isRead:true}:row));
+    patchLocalRead([n.id]);
     void refreshInboxUnread();
   };
 
@@ -92,7 +133,8 @@ export function Notifications(){
     setBusyAll(true);
     try{
       await request('POST','/notifications/read-all');
-      setItems((prev)=>prev.map((n)=>({...n,readAt:n.readAt||new Date().toISOString(),isRead:true})));
+      patchLocalRead(null);
+      if (userId) invalidateAfterNotificationChange(userId, queryClient);
       void refreshInboxUnread();
       toast.success('All notifications marked as read.');
     }catch(e){toast.error(messageOf(e))}
@@ -135,7 +177,7 @@ export function Notifications(){
             <option value="SYSTEM">System</option>
           </select>
         </label>
-        {loading?<Loading/>:error?<Failure error={error} retry={()=>void load()}/>:visible.length?<>
+        {loading?<Loading/>:error?<Failure error={error} retry={()=>void listQuery.refetch()}/>:visible.length?<>
           {visible.map((n)=>{
             const unread=!n.isRead&&!n.readAt;
             const photo=notificationPhotoUrl(n);
@@ -161,8 +203,8 @@ export function Notifications(){
               </button>
             );
           })}
-          {nextCursor&&filter==='all'&&typeFilter==='ALL'&&(
-            <Button tone="outline" className="full" disabled={loadingMore} onClick={()=>void load(nextCursor)}>{loadingMore?'Loading…':'Load more'}</Button>
+          {hasMore&&filter==='all'&&typeFilter==='ALL'&&(
+            <Button tone="outline" className="full" disabled={loadingMore} onClick={()=>void listQuery.fetchNextPage()}>{loadingMore?'Loading…':'Load more'}</Button>
           )}
         </>:<Empty title={filter==='unread'?'No unread notifications':'All caught up'} detail="Your notifications will appear here."/>}
       </Panel>
@@ -173,22 +215,55 @@ export function Notifications(){
   </div>;
 }
 export function Premium(){
-  const {toast}=useApp();
-  const plans=useGet<{items:Product[];billing?:{configured?:boolean;provider?:string}}>('/subscriptions/products');
-  const entitlement=useGet<Entitlement>('/subscriptions/entitlement');
-  const history=useGet<{items:import('@/lib/types').PaymentHistoryItem[]}>('/subscriptions/history?limit=10');
+  const {toast,session}=useApp();
+  const queryClient=useQueryClient();
+  const userId=session?.userId||'';
+  const plans=useQuery({
+    queryKey: queryKeys.subscriptions.products(userId || '__none__'),
+    queryFn: fetchSubscriptionProducts,
+    enabled: Boolean(userId),
+    staleTime: cachePolicies.subscriptionProducts.staleTime,
+    gcTime: cachePolicies.subscriptionProducts.gcTime,
+  });
+  const entitlement=useQuery({
+    queryKey: queryKeys.subscriptions.entitlement(userId || '__none__'),
+    queryFn: fetchSubscriptionEntitlement,
+    enabled: Boolean(userId),
+    staleTime: cachePolicies.subscriptionEntitlement.staleTime,
+    gcTime: cachePolicies.subscriptionEntitlement.gcTime,
+  });
+  const history=useQuery({
+    queryKey: queryKeys.subscriptions.history(userId || '__none__'),
+    queryFn: fetchSubscriptionHistory,
+    enabled: Boolean(userId),
+    staleTime: cachePolicies.subscriptionHistory.staleTime,
+    gcTime: cachePolicies.subscriptionHistory.gcTime,
+  });
   const [busyId,setBusyId]=useState('');
   const billing=plans.data?.billing;
   const isPlus=Boolean(entitlement.data?.isActive&&entitlement.data?.tier==='PLUS');
 
-  const refreshAll=async()=>{await Promise.all([plans.refresh(),entitlement.refresh(),history.refresh()])};
+  const refreshAll=async()=>{
+    if (!userId) return;
+    invalidateAfterSubscriptionChange(userId, queryClient);
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: queryKeys.subscriptions.products(userId) }),
+      queryClient.refetchQueries({ queryKey: queryKeys.subscriptions.entitlement(userId) }),
+      queryClient.refetchQueries({ queryKey: queryKeys.subscriptions.history(userId) }),
+    ]);
+  };
 
   const buy=async(productId:string,outcome:'SUCCESS'|'FAILURE')=>{
     setBusyId(`${productId}:${outcome}`);
     try{
       const checkout=await request<import('@/lib/types').CheckoutSession>('POST','/subscriptions/checkout',{body:{productId,platform:'WEB',idempotencyKey:crypto.randomUUID()}});
       const result=await request<{entitlement:Entitlement;payment:{status:string;isDemo?:boolean}}>('POST','/subscriptions/verify',{body:{checkoutId:checkout.checkoutId,providerProof:{outcome}}});
-      if(result.payment.status==='SUCCEEDED')toast.success(result.payment.isDemo?'Demo Plus activated.':'Plus activated.');
+      if(result.payment.status==='SUCCEEDED'){
+        toast.success(result.payment.isDemo?'Demo Plus activated.':'Plus activated.');
+        if (userId && result.entitlement) {
+          queryClient.setQueryData(queryKeys.subscriptions.entitlement(userId), result.entitlement);
+        }
+      }
       else toast.error('Payment failed. You were not charged.');
       await refreshAll();
     }catch(e){toast.error(messageOf(e))}
@@ -207,7 +282,7 @@ export function Premium(){
     <div className="premium-hero"><Crown size={32}/><span>ENJOY MORE CONNECTIONS</span><h2>Love the possibilities.</h2>
       <p>{billing?.configured?`Payments run through the ${billing.provider||'configured'} provider. Demo charges are simulated and never real money.`:'Billing is not configured on this server yet.'}</p>
     </div>
-    <div className="plan-grid">{plans.loading?<Loading/>:plans.error?<p className="field-error">{plans.error}</p>:plans.data?.items.map(p=>
+    <div className="plan-grid">{plans.isPending&&!plans.data?<Loading/>:plans.isError?<p className="field-error">{messageOf(plans.error)}</p>:plans.data?.items.map(p=>
       <section key={p.id} className="price-card"><Crown size={23}/><h2>{p.title}</h2><p>{p.description}</p>
         <h3>{p.priceLabel||'See store price'}<small>{p.period?` / ${p.period.toLowerCase()}`:''}</small></h3>
         {billing?.configured&&billing.provider==='demo'?<div className="stack">
@@ -222,7 +297,7 @@ export function Premium(){
       {isPlus&&entitlement.data?.willRenew?<Button tone="outline" disabled={busyId==='cancel'} onClick={()=>void cancel()}>{busyId==='cancel'?'Cancelling…':'Cancel auto-renew'}</Button>:null}
     </div></div>
     <Panel title="Payment history" subtitle="Server-verified transactions for this account.">
-      {history.loading?<Loading/>:history.error?<p className="field-error">{history.error}</p>:history.data?.items?.length?history.data.items.map(item=>
+      {history.isPending&&!history.data?<Loading/>:history.isError?<p className="field-error">{messageOf(history.error)}</p>:history.data?.items?.length?history.data.items.map(item=>
         <div key={item.id} className="setting-row">
           <span><strong>{item.productId}</strong><small className="muted"> · {item.status}{item.isDemo?' · DEMO':''} · {(item.amountMinor/100).toLocaleString(undefined,{style:'currency',currency:item.currency||'INR'})}</small></span>
           <small className="muted">{item.createdAt?new Date(item.createdAt).toLocaleString():''}</small>
@@ -451,6 +526,7 @@ export function Account(){
       await request('DELETE',`/users/${id}/block`);
       toast.success('Member unblocked.');
       void blocked.refresh();
+      if (me?.id) invalidateAfterBlockChange(me.id);
     }catch(e){toast.error(messageOf(e))}
   };
 

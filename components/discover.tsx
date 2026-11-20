@@ -1,16 +1,23 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Bookmark, Heart, MapPin, RotateCcw, Settings2, ShieldCheck, Sparkles, Star, X, Info } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { request, uid, messageOf, mediaUrl } from '@/lib/api';
 import { getDiscovery, invalidateDiscoveryCache } from '@/lib/discovery-cache';
+import { fetchProfileById } from '@/lib/query/fetchers';
+import { invalidateAfterBlockChange, invalidateAfterSwipeOrMatch } from '@/lib/query/invalidation';
+import { queryKeys } from '@/lib/query/keys';
+import { cachePolicies } from '@/lib/query/policies';
 import type { Member, Match } from '@/lib/types';
 import { Badge, Button, Empty, Failure, Modal, Avatar } from './ui';
 import { useApp } from './provider';
 import { useCall } from './call-provider';
 
 export function Discover({go}: {go:(path:string)=>void}) {
-  const {toast,confirmAction,me} = useApp();
+  const {toast,confirmAction,me,session} = useApp();
+  const queryClient = useQueryClient();
   const {callSocket} = useCall();
+  const userId = session?.userId || '';
   const [profiles,setProfiles] = useState<Member[]>([]);
   const [busy,setBusy] = useState(false);
   const [swipeFeedback,setSwipeFeedback] = useState<'LIKE'|'PASS'|'SUPER_LIKE'|null>(null);
@@ -56,16 +63,35 @@ export function Discover({go}: {go:(path:string)=>void}) {
       }
       setHistory(h=>[...h,{profile,matched:Boolean(response?.isMatch)}]);setProfiles(p=>p.slice(1));setIdx(0);setSwipeFeedback(null);
       invalidateDiscoveryCache();
+      if (userId) invalidateAfterSwipeOrMatch(userId, queryClient);
       if(response?.isMatch&&response.match) setMatched(response.match);
     }catch(e){setSwipeFeedback(null);toast.error(messageOf(e))}finally{setBusy(false)}
   };
   const undo=async()=>{const last=history.at(-1);if(!last||last.matched)return;
     setBusy(true);
-    try{const restored=await request<{restoredProfile?:Member}>('POST','/swipes/undo');setProfiles(p=>[restored?.restoredProfile||last.profile,...p]);setHistory(h=>h.slice(0,-1));toast.success('Last swipe undone.');}
+    try{
+      const restored=await request<{restoredProfile?:Member}>('POST','/swipes/undo');
+      setProfiles(p=>[restored?.restoredProfile||last.profile,...p]);
+      setHistory(h=>h.slice(0,-1));
+      toast.success('Last swipe undone.');
+      if (userId) invalidateAfterSwipeOrMatch(userId, queryClient);
+    }
     catch(e){toast.error(messageOf(e))}finally{setBusy(false)}
   };
-  const showDetails=async(member:Member)=>{setDetails(member);try{const full=await request<Member>('GET',`/profiles/${member.id}`);setDetails(full)}catch(e){toast.error(messageOf(e))}};
-  const reportUser=async()=>{if(!details)return;try{await request('POST','/reports',{body:{targetType:'USER',targetId:details.id,reason:reportReason,details:reportDetails||undefined,alsoBlock:true}});toast.success('Report submitted.');setReportOpen(false);setDetails(null);setProfiles(p=>p.filter(x=>x.id!==details.id));}catch(e){toast.error(messageOf(e))}};
+  const showDetails=async(member:Member)=>{
+    setDetails(member);
+    try{
+      const full = userId
+        ? await queryClient.fetchQuery({
+            queryKey: queryKeys.profile.byId(userId, member.id),
+            queryFn: () => fetchProfileById(member.id),
+            staleTime: cachePolicies.profileById.staleTime,
+          })
+        : await fetchProfileById(member.id);
+      setDetails(full);
+    }catch(e){toast.error(messageOf(e))}
+  };
+  const reportUser=async()=>{if(!details)return;try{await request('POST','/reports',{body:{targetType:'USER',targetId:details.id,reason:reportReason,details:reportDetails||undefined,alsoBlock:true}});toast.success('Report submitted.');setReportOpen(false);setDetails(null);setProfiles(p=>p.filter(x=>x.id!==details.id));if(userId)invalidateAfterBlockChange(userId,queryClient);}catch(e){toast.error(messageOf(e))}};
   const block=async()=>{
     if(!details)return;
     const ok=await confirmAction({
@@ -75,7 +101,13 @@ export function Discover({go}: {go:(path:string)=>void}) {
       danger:true,
     });
     if(!ok)return;
-    try{await request('POST',`/users/${details.id}/block`);toast.success('Member blocked.');setProfiles(p=>p.filter(x=>x.id!==details.id));setDetails(null)}catch(e){toast.error(messageOf(e))}
+    try{
+      await request('POST',`/users/${details.id}/block`);
+      toast.success('Member blocked.');
+      setProfiles(p=>p.filter(x=>x.id!==details.id));
+      setDetails(null);
+      if (userId) invalidateAfterBlockChange(userId, queryClient);
+    }catch(e){toast.error(messageOf(e))}
   };
   const photos=profile?.photos||[];
   return <div className="discover-page">
