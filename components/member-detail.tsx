@@ -17,7 +17,7 @@ interface MemberDetailProps {
 }
 
 export function MemberDetail({ id, go }: MemberDetailProps) {
-  const { notify } = useApp();
+  const { toast, confirmAction } = useApp();
   const [person, setPerson] = useState<Member | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -87,9 +87,9 @@ export function MemberDetail({ id, go }: MemberDetailProps) {
   const handleShare = useCallback(() => {
     if (typeof window !== 'undefined') {
       void navigator.clipboard.writeText(window.location.href);
-      notify('Profile link copied to clipboard!');
+      toast.info('Profile link copied to clipboard!');
     }
-  }, [notify]);
+  }, [toast]);
 
   const like = async (action: 'LIKE' | 'SUPER_LIKE' = 'LIKE') => {
     setBusy(true);
@@ -101,26 +101,33 @@ export function MemberDetail({ id, go }: MemberDetailProps) {
       setLiked(true);
       if (d.isMatch) {
         setMatchedData({ conversationId: d.match?.conversationId });
-        notify("It's a match! 🎉");
+        toast.success("It's a match! 🎉");
       } else {
-        notify(action === 'SUPER_LIKE' ? 'Super like sent! ⭐' : 'Like sent! 💗');
+        toast.success(action === 'SUPER_LIKE' ? 'Super like sent! ⭐' : 'Like sent! 💗');
       }
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     } finally {
       setBusy(false);
     }
   };
 
   const block = async () => {
-    if (!person || !confirm(`Block ${person.displayName}? You will no longer see each other.`)) return;
+    if (!person) return;
+    const ok = await confirmAction({
+      title: `Block ${person.displayName}?`,
+      message: 'You will no longer see each other.',
+      confirmLabel: 'Block member',
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await request('POST', `/users/${encodeURIComponent(id)}/block`);
-      notify('Member blocked.');
+      toast.success('Member blocked.');
       go('/matches');
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     } finally {
       setBusy(false);
     }
@@ -132,11 +139,11 @@ export function MemberDetail({ id, go }: MemberDetailProps) {
       await request('POST', '/reports', {
         body: { targetType: 'USER', targetId: id, reason, details, alsoBlock: true },
       });
-      notify('Report submitted.');
+      toast.success('Report submitted.');
       setReportOpen(false);
       go('/matches');
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     } finally {
       setBusy(false);
     }

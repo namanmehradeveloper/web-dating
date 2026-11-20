@@ -16,7 +16,7 @@ function tabFromQuery(value: string | null): MatchTab {
 }
 
 export function Matches({go}: {go:(p:string)=>void}) {
- const {notify}=useApp();
+ const {toast,confirmAction}=useApp();
  const {callSocket,callConnected}=useCall();
  const router = useRouter();
  const searchParams = useSearchParams();
@@ -68,12 +68,21 @@ export function Matches({go}: {go:(p:string)=>void}) {
   setLikeBusy(id);
   try{
    const response=await request<{isMatch?:boolean;match?:Match}>('POST','/swipes',{body:{targetUserId:id,action:'LIKE'},idempotencyKey:uid()});
-   notify(response?.isMatch?'It\'s a match!':'Like sent!');
+   toast.success(response?.isMatch?'It\'s a match!':'Like sent!');
    void load(true);
-  }catch(e){notify(messageOf(e))}
+  }catch(e){toast.error(messageOf(e))}
   finally{setLikeBusy(null)}
  }
- async function unmatch(match:Match){if(!confirm(`Unmatch ${match.otherUser.displayName}?`))return;try{await request('POST',`/matches/${match.id}/unmatch`);setMore(null);notify('Match removed.');void load(true)}catch(e){notify(messageOf(e))}}
+ async function unmatch(match:Match){
+  const ok=await confirmAction({
+    title:`Unmatch ${match.otherUser.displayName}?`,
+    message:`Remove your match with ${match.otherUser.displayName}? You can still discover each other later.`,
+    confirmLabel:'Unmatch',
+    danger:true,
+  });
+  if(!ok)return;
+  try{await request('POST',`/matches/${match.id}/unmatch`);setMore(null);toast.success('Match removed.');void load(true)}catch(e){toast.error(messageOf(e))}
+ }
  async function confirmCancelLike(){
   if(!cancelTarget||cancelBusy) return;
   const targetId=cancelTarget.user.id;
@@ -83,9 +92,9 @@ export function Matches({go}: {go:(p:string)=>void}) {
    await request('POST',`/likes/sent/${encodeURIComponent(targetId)}/cancel`);
    setSent(list=>list.filter(item=>item.user.id!==targetId));
    setCancelTarget(null);
-   notify(wasSuper?'Super like canceled.':'Like canceled.');
+   toast.success(wasSuper?'Super like canceled.':'Like canceled.');
   }catch(e){
-   notify(messageOf(e));
+   toast.error(messageOf(e));
    void load(true);
   }finally{setCancelBusy(false)}
  }

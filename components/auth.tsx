@@ -39,7 +39,7 @@ function toE164(dial: string, national: string) {
 }
 
 export function Auth({initialMode='phone'}:{initialMode?:FormMode}) {
-  const {signIn,notify} = useApp();
+  const {signIn} = useApp();
   const searchParams=useSearchParams();
   const [mode, setMode] = useState<FormMode>(initialMode);
   const [countryCode, setCountryCode] = useState<string>('IN');

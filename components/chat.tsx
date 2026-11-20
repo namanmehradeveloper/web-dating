@@ -191,7 +191,7 @@ function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
 }
 
 export function Chat({ go }: { go: (p: string) => void }) {
-  const { session, notify } = useApp();
+  const { session, toast, confirmAction } = useApp();
   const { activeCall, callConnected, callSocket, startCall: placeCall } = useCall();
   const { setActiveConversationId, markConversationRead, refreshUnreadFromServer } = useMessages();
   const pathname = usePathname();
@@ -240,7 +240,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const emojiPickerRef = useRef<HTMLDivElement | null>(null);
   const composingRef = useRef(false);
   const prevMessageCount = useRef(0);
-  const notifyRef = useRef(notify);
+  const toastRef = useRef(toast);
   const loadRef = useRef<(showLoader?: boolean) => Promise<Conversation[]>>(async () => []);
   const refreshUnreadRef = useRef(refreshUnreadFromServer);
   const goRef = useRef(go);
@@ -256,11 +256,11 @@ export function Chat({ go }: { go: (p: string) => void }) {
 
   const handleFileSelected = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) {
-      notify('Please select an image file (JPG, PNG, WebP).');
+      toast.warning('Please select an image file (JPG, PNG, WebP).');
       return;
     }
     if (file.size > 15 * 1024 * 1024) {
-      notify('Image must be under 15MB.');
+      toast.warning('Image must be under 15MB.');
       return;
     }
     const previewUrl = URL.createObjectURL(file);
@@ -270,7 +270,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
     });
     setAttachOpen(false);
     setTimeout(() => inputRef.current?.focus(), 60);
-  }, [notify]);
+  }, [toast]);
 
   useEffect(() => {
     if (!emojiOpen) return;
@@ -283,7 +283,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [emojiOpen]);
 
-  useEffect(() => { notifyRef.current = notify; }, [notify]);
+  useEffect(() => { toastRef.current = toast; }, [toast]);
   useEffect(() => { goRef.current = go; }, [go]);
   useEffect(() => { refreshUnreadRef.current = refreshUnreadFromServer; }, [refreshUnreadFromServer]);
   useEffect(() => {
@@ -401,11 +401,11 @@ export function Chat({ go }: { go: (p: string) => void }) {
       }
       setConversations((c) => c.map((v) => (v.id === id ? { ...v, unreadCount: 0 } : v)));
     } catch (e) {
-      if (seq === messageRequestSeq.current) notify(messageOf(e));
+      if (seq === messageRequestSeq.current) toast.error(messageOf(e));
     } finally {
       if (seq === messageRequestSeq.current) setMsgLoading(false);
     }
-  }, [session?.userId, notify]);
+  }, [session?.userId, toast]);
 
   useEffect(() => {
     if (selected) void open(selected);
@@ -446,11 +446,11 @@ export function Chat({ go }: { go: (p: string) => void }) {
     };
     const onConnectError = (e: Error) => {
       setLiveStatus(everConnected.current ? 'offline' : 'connecting');
-      if (e.message !== 'websocket error') notifyRef.current(`Live chat: ${e.message}`);
+      if (e.message !== 'websocket error') toastRef.current.warning(`Live chat: ${e.message}`);
     };
     const onSessionExpired = () => {
       setLiveStatus('offline');
-      notifyRef.current('Live session expired. Reload to reconnect with a refreshed token.');
+      toastRef.current.warning('Live session expired. Reload to reconnect with a refreshed token.');
     };
     const onMessageNew = ({ message }: { message: ChatMessage }) => {
       if (selectedRef.current === message.conversationId) {
@@ -638,7 +638,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
       setStoreCatalog({ gifts: cat.gifts || [], emojiPacks: cat.emojiPacks || [] });
       setStoreWallet(wal);
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
       setGiftOpen(false);
     } finally {
       setStoreLoading(false);
@@ -667,7 +667,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
       void load(false);
       requestAnimationFrame(() => scrollThreadToBottom('smooth'));
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     } finally {
       setSending(false);
     }
@@ -687,7 +687,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
         setSending(false);
       } catch (e) {
         setSending(false);
-        notify(messageOf(e));
+        toast.error(messageOf(e));
         return;
       }
     }
@@ -713,41 +713,62 @@ export function Chat({ go }: { go: (p: string) => void }) {
           ? { targetType: 'USER', targetId: report.id, reason, details, alsoBlock }
           : { reason, details, alsoBlock },
       });
-      notify('Report submitted.');
+      toast.success('Report submitted.');
       setReport(null);
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     }
   };
 
   const blockAction = async () => {
-    if (!convo || !confirm(`Block ${convo.otherUser.displayName}?`)) return;
+    if (!convo) return;
+    const ok = await confirmAction({
+      title: `Block ${convo.otherUser.displayName}?`,
+      message: 'You will no longer see each other on Dating Cloud.',
+      confirmLabel: 'Block member',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await request('POST', `/users/${convo.otherUser.id}/block`);
       setSelected(null);
       setOptions(false);
-      notify('Member blocked');
+      toast.success('Member blocked');
       void load();
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     }
   };
 
   const unmatchAction = async () => {
-    if (!convo || !confirm(`Unmatch ${convo.otherUser.displayName}?`)) return;
+    if (!convo) return;
+    const ok = await confirmAction({
+      title: `Unmatch ${convo.otherUser.displayName}?`,
+      message: `Remove your match with ${convo.otherUser.displayName}?`,
+      confirmLabel: 'Unmatch',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await request('POST', `/matches/${convo.matchId}/unmatch`);
       setSelected(null);
       setOptions(false);
-      notify('Unmatched');
+      toast.success('Unmatched');
       void load();
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     }
   };
 
   const deleteChatAction = async () => {
-    if (!convo || !confirm(`Delete chat with ${convo.otherUser.displayName}? This removes the conversation only for you.`)) return;
+    if (!convo) return;
+    const ok = await confirmAction({
+      title: `Delete chat with ${convo.otherUser.displayName}?`,
+      message: 'This removes the conversation only for you.',
+      confirmLabel: 'Delete chat',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const conversationId = convo.id;
       await request('DELETE', `/conversations/${encodeURIComponent(conversationId)}`);
@@ -756,35 +777,47 @@ export function Chat({ go }: { go: (p: string) => void }) {
       setSelected(null);
       setOptions(false);
       go('/messages');
-      notify('Chat deleted');
+      toast.success('Chat deleted');
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     }
   };
 
   const deleteMessageForMe = async (messageId: string) => {
-    if (!confirm('Delete this message for you? The other person will still see it.')) return;
+    const ok = await confirmAction({
+      title: 'Delete this message for you?',
+      message: 'The other person will still see it.',
+      confirmLabel: 'Delete for me',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await request('DELETE', `/messages/${encodeURIComponent(messageId)}`);
       setMessages((current) => current.filter((message) => message.id !== messageId));
       setMessageMenu(null);
       void load(false);
-      notify('Message deleted');
+      toast.success('Message deleted');
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     }
   };
 
   const unsendMessageAction = async (messageId: string) => {
-    if (!confirm('Unsend this message for everyone?')) return;
+    const ok = await confirmAction({
+      title: 'Unsend this message for everyone?',
+      message: 'The message will be removed for both of you.',
+      confirmLabel: 'Unsend',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const updated = await request<ChatMessage>('POST', `/messages/${encodeURIComponent(messageId)}/unsend`);
       setMessages((current) => mergeMessages(current, [updated]));
       setMessageMenu(null);
       void load(false);
-      notify('Message unsent');
+      toast.success('Message unsent');
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     }
   };
 
@@ -807,11 +840,11 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const startCall = async (type: 'AUDIO' | 'VIDEO') => {
     if (!convo) return;
     if (!callConnected && !socketRef.current?.connected) {
-      notify('Connect to live messaging before starting a call.');
+      toast.warning('Connect to live messaging before starting a call.');
       return;
     }
     if (activeCall) {
-      notify('You are already in a call.');
+      toast.warning('You are already in a call.');
       return;
     }
     const photo = convo.otherUser.photos?.[0]?.url;
@@ -884,7 +917,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
                 className={listFilter === 'favourites' ? 'active' : ''}
                 onClick={() => {
                   setListFilter('favourites');
-                  notify('Favourites are coming soon.');
+                  toast.info('Favourites are coming soon.');
                 }}
               >
                 Favourites
@@ -1146,7 +1179,7 @@ export function Chat({ go }: { go: (p: string) => void }) {
                                       role="menuitem"
                                       onClick={() => {
                                         void navigator.clipboard.writeText(msg.text || '');
-                                        notify('Message copied to clipboard');
+                                        toast.info('Message copied to clipboard');
                                         setMessageMenu(null);
                                       }}
                                     >

@@ -6,7 +6,7 @@ import {request,messageOf} from '@/lib/api';
 import {useApp} from './provider';
 
 export function ContactPage(){
-  const {session,notify}=useApp();
+  const {session}=useApp();
   const [name,setName]=useState('');
   const [email,setEmail]=useState('');
   const [category,setCategory]=useState('ACCOUNT');
@@ -50,7 +50,7 @@ export function ContactPage(){
       setSubject('');
       setBody('');
       setIdempotencyKey(crypto.randomUUID());
-      notify(session?'Your support ticket has been created.':'Your message was sent. Our team will reply by email.');
+      // Inline .dc-success banner only — avoid a duplicate toast for the same success.
     }catch(e){
       setError(messageOf(e));
     }finally{

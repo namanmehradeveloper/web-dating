@@ -14,7 +14,7 @@ type PendingPurchase =
   | { kind: 'COINS'; item: StoreItem };
 
 export function Store() {
-  const { notify } = useApp();
+  const { toast } = useApp();
   const [tab, setTab] = useState<Tab>('coins');
   const [catalog, setCatalog] = useState<{ coinPacks: StoreItem[]; emojiPacks: StoreItem[]; gifts: StoreItem[] } | null>(null);
   const [wallet, setWallet] = useState<StoreWallet | null>(null);
@@ -56,14 +56,14 @@ export function Store() {
         { body: { checkoutId: checkout.checkoutId, providerProof: { outcome } } },
       );
       if (result.purchase.status === 'SUCCEEDED') {
-        notify(result.purchase.isDemo ? 'Demo coins added.' : 'Coins added.');
+        toast.success(result.purchase.isDemo ? 'Demo coins added.' : 'Coins added.');
         setWallet(result.wallet);
       } else {
-        notify('Payment failed. No coins were added.');
+        toast.error('Payment failed. No coins were added.');
       }
       await refresh();
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     } finally {
       setBusyId('');
     }
@@ -76,10 +76,10 @@ export function Store() {
         body: { itemId },
       });
       setWallet(result.wallet);
-      notify('Added to your inventory.');
+      toast.success('Added to your inventory.');
       await refresh();
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     } finally {
       setBusyId('');
     }

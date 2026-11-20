@@ -11,7 +11,7 @@ const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const fileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
 
 export function Onboarding() {
- const {reloadMe,notify} = useApp();
+ const {reloadMe,toast} = useApp();
  const [step,setStep] = useState(0);
  const [name,setName] = useState('');const [dob,setDob] = useState(''); const [gender,setGender] = useState('WOMAN');const [showMe,setShowMe] = useState('EVERYONE');
  const [goal,setGoal] = useState('LONG_TERM');const [bio,setBio] = useState('');const [city,setCity] = useState('');const [distance,setDistance] = useState(50);
@@ -50,7 +50,7 @@ export function Onboarding() {
   const photoMediaIds:string[]=[];
   for(const f of files){const result=await upload(f);photoMediaIds.push(result.mediaId|| (result as any).id)}
   await request('POST','/profile/onboarding',{body:{displayName:name.trim(),dateOfBirth:dob,gender,showGender:true,showMe,maxDistanceKm:distance,relationshipGoal:goal,interestIds:interests,photoMediaIds,bio:bio.trim()||undefined,city:city.trim()||undefined,acceptedTermsVersion:process.env.NEXT_PUBLIC_TERMS_VERSION || '2026-01'}});
-  notify('Welcome to Dating Cloud! Your profile is ready.');await reloadMe();
+  toast.success('Welcome to Dating Cloud! Your profile is ready.');await reloadMe();
  }catch(e){setError(messageOf(e))}finally{setBusy(false)}};
  return <div className="onboarding-layout"><div className="onboarding-card">
   <div className="onboarding-top"><span className="logo-icon"><Heart fill="currentColor" size={20}/></span><span>Dating Cloud</span><span className="step-tag">STEP {step+1} / 4</span></div>

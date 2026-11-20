@@ -30,7 +30,7 @@ type NotifFilter = 'all' | 'unread' | 'read';
 type NotifTypeFilter = 'ALL' | 'NEW_MESSAGE' | 'NEW_MATCH' | 'NEW_LIKE' | 'VERIFICATION_RESULT' | 'SYSTEM';
 
 export function Notifications(){
-  const {notify}=useApp();
+  const {toast}=useApp();
   const searchParams=useSearchParams();
   const focusId=searchParams.get('focus');
   const {refreshInboxUnread,soundMuted,setSoundMuted,openNotificationDestination}=useMessages();
@@ -63,7 +63,7 @@ export function Notifications(){
     return()=>document.removeEventListener('visibilitychange',onFocus);
   },[refreshInboxUnread]);
 
-  const change=async(key:string,v:boolean)=>{try{await request('PATCH','/notification-preferences',{body:{[key]:v}});void prefs.refresh()}catch(e){notify(messageOf(e))}};
+  const change=async(key:string,v:boolean)=>{try{await request('PATCH','/notification-preferences',{body:{[key]:v}});void prefs.refresh()}catch(e){toast.error(messageOf(e))}};
 
   const openNotification=async(n:Notification)=>{
     await openNotificationDestination(n);
@@ -77,8 +77,8 @@ export function Notifications(){
       await request('POST','/notifications/read-all');
       setItems((prev)=>prev.map((n)=>({...n,readAt:n.readAt||new Date().toISOString(),isRead:true})));
       void refreshInboxUnread();
-      notify('All notifications marked as read.');
-    }catch(e){notify(messageOf(e))}
+      toast.success('All notifications marked as read.');
+    }catch(e){toast.error(messageOf(e))}
     finally{setBusyAll(false)}
   };
 
@@ -156,7 +156,7 @@ export function Notifications(){
   </div>;
 }
 export function Premium(){
-  const {notify}=useApp();
+  const {toast}=useApp();
   const plans=useGet<{items:Product[];billing?:{configured?:boolean;provider?:string}}>('/subscriptions/products');
   const entitlement=useGet<Entitlement>('/subscriptions/entitlement');
   const history=useGet<{items:import('@/lib/types').PaymentHistoryItem[]}>('/subscriptions/history?limit=10');
@@ -171,17 +171,17 @@ export function Premium(){
     try{
       const checkout=await request<import('@/lib/types').CheckoutSession>('POST','/subscriptions/checkout',{body:{productId,platform:'WEB',idempotencyKey:crypto.randomUUID()}});
       const result=await request<{entitlement:Entitlement;payment:{status:string;isDemo?:boolean}}>('POST','/subscriptions/verify',{body:{checkoutId:checkout.checkoutId,providerProof:{outcome}}});
-      if(result.payment.status==='SUCCEEDED')notify(result.payment.isDemo?'Demo Plus activated.':'Plus activated.');
-      else notify('Payment failed. You were not charged.');
+      if(result.payment.status==='SUCCEEDED')toast.success(result.payment.isDemo?'Demo Plus activated.':'Plus activated.');
+      else toast.error('Payment failed. You were not charged.');
       await refreshAll();
-    }catch(e){notify(messageOf(e))}
+    }catch(e){toast.error(messageOf(e))}
     finally{setBusyId('')}
   };
 
   const cancel=async()=>{
     setBusyId('cancel');
-    try{await request('POST','/subscriptions/cancel',{body:{}});notify('Auto-renew turned off. Plus stays active until it expires.');await refreshAll()}
-    catch(e){notify(messageOf(e))}
+    try{await request('POST','/subscriptions/cancel',{body:{}});toast.info('Auto-renew turned off. Plus stays active until it expires.');await refreshAll()}
+    catch(e){toast.error(messageOf(e))}
     finally{setBusyId('')}
   };
 
@@ -215,7 +215,7 @@ export function Premium(){
   </div>;
 }
 export function Help(){
-  const {notify,session,me}=useApp();
+  const {toast,session,me}=useApp();
   const searchParams=useSearchParams();
   const router=useRouter();
   const ticketParam=searchParams.get('ticket');
@@ -316,7 +316,7 @@ export function Help(){
         },
         idempotencyKey:createKey,
       });
-      notify('Support ticket created.');
+      toast.success('Support ticket created.');
       setBody('');
       setSubject('');
       setFormError('');
@@ -324,9 +324,8 @@ export function Help(){
       await loadTickets();
       openTicket(t.id);
     }catch(e){
-      const msg=messageOf(e);
-      setFormError(msg);
-      notify(msg);
+      // Inline form error only — avoid duplicate toast for the same failure.
+      setFormError(messageOf(e));
     }
     finally{setSending(false)}
   };
@@ -342,9 +341,9 @@ export function Help(){
       setDetail(updated);
       setReply('');
       setReplyKey(crypto.randomUUID());
-      notify('Reply sent.');
+      toast.success('Reply sent.');
       void loadTickets();
-    }catch(e){notify(messageOf(e))}
+    }catch(e){toast.error(messageOf(e))}
     finally{setReplying(false)}
   };
 
@@ -422,7 +421,7 @@ export function LoginActivity(){const [items,setItems]=useState<LoginActivityEnt
  const loadMore=async()=>{if(!cursor||loadingMore)return;setLoadingMore(true);setError('');try{const page=await request<LoginActivityPage>('GET',`/profile/login-activity?limit=20&cursor=${encodeURIComponent(cursor)}`);setItems(current=>[...current,...page.items]);setCursor(page.nextCursor||null)}catch(e){setError(messageOf(e))}finally{setLoadingMore(false)}};
  return <div><Heading label="SECURITY" title="Login Activity" description="Review recent sign-ins to your account."/><div className="security-back"><Link href="/account" className="button outline">Back to Settings</Link></div><Panel title="Recent sign-ins" subtitle="Only you can see your login activity. Times are shown in UTC.">{loading?<Loading/>:error&&!items.length?<Failure error={error} retry={()=>{setLoading(true);void request<LoginActivityPage>('GET','/profile/login-activity?limit=20').then(page=>{setItems(page.items);setCursor(page.nextCursor||null);setError('')}).catch(e=>setError(messageOf(e))).finally(()=>setLoading(false))}}/>:items.length?<div className="login-history-list">{items.map(entry=>{const location=[entry.city,entry.state,entry.country].filter(Boolean).join(', ');return <article key={entry.id} className="login-history-entry"><div className="login-history-entry__top"><strong>{new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'UTC',timeZoneName:'short'}).format(new Date(entry.loginAt))}</strong><span>{entry.ipAddress||'IP unavailable'}</span></div><div className="login-history-entry__details"><span><MapPin size={15}/>{location||'Location unavailable'}</span><span><Monitor size={15}/>{entry.deviceName} · {entry.deviceType.toLowerCase()}</span><span><ShieldCheck size={15}/>{entry.browser} · {entry.operatingSystem}</span></div></article>})}</div>:<Empty title="No login activity yet" detail="Successful sign-ins will appear here."/>}{error&&items.length>0&&<Failure error={error} />}{cursor&&<div className="login-history-more"><Button tone="outline" disabled={loadingMore} onClick={()=>void loadMore()}>{loadingMore?'Loading…':'Load older activity'}</Button></div>}</Panel></div>}
 export function Account(){
-  const {me,signOut,notify}=useApp();
+  const {me,signOut,toast,confirmAction}=useApp();
   const blocked=useGet<{items:{user:Member;blockedAt:string}[]}>('/blocks?limit=50');
   const exported=useGet<{status:string; downloadUrl?:string;expiresAt?:string}>('/account/export-status');
   const[reason,setReason]=useState('');
@@ -433,9 +432,9 @@ export function Account(){
   const unblock=async(id:string)=>{
     try{
       await request('DELETE',`/users/${id}/block`);
-      notify('Member unblocked.');
+      toast.success('Member unblocked.');
       void blocked.refresh();
-    }catch(e){notify(messageOf(e))}
+    }catch(e){toast.error(messageOf(e))}
   };
 
   const deletion=async()=>{
@@ -443,8 +442,18 @@ export function Account(){
     try{
       await request('POST','/account/deletion-request',{body:{confirm:true,reason,feedback}});
       await signOut(true);
-      notify('Your account deletion has been requested.');
-    }catch(e){notify(messageOf(e))}
+      toast.info('Your account deletion has been requested.');
+    }catch(e){toast.error(messageOf(e))}
+  };
+
+  const signOutEverywhere=async()=>{
+    const ok=await confirmAction({
+      title:'Sign out everywhere?',
+      message:'This ends every active Dating Cloud session on your other devices.',
+      confirmLabel:'Sign out all devices',
+      danger:true,
+    });
+    if(ok) void signOut(true);
   };
 
   const exportReady=exported.data?.status==='READY'&&exported.data.downloadUrl;
@@ -468,7 +477,7 @@ export function Account(){
         <div className="dc-account-identity-actions">
           <Link href="/profile" className="button outline"><UserRound size={16}/> Edit profile</Link>
           <Button tone="outline" onClick={()=>void signOut()}><LogOut size={16}/> Log out</Button>
-          <Button tone="quiet" onClick={()=>{if(confirm('Sign out everywhere?'))void signOut(true)}}>Sign out all devices</Button>
+          <Button tone="quiet" onClick={()=>void signOutEverywhere()}>Sign out all devices</Button>
         </div>
       </section>
 

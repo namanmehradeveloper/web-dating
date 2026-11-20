@@ -89,7 +89,7 @@ function showBrowserNotification(title: string, body: string, tag: string) {
 }
 
 export function CallProvider({ children }: { children: ReactNode }) {
-  const { session, notify } = useApp();
+  const { session, toast } = useApp();
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [peer, setPeer] = useState<CallPeerInfo | null>(null);
   const [callSocket, setCallSocket] = useState<Socket | null>(null);
@@ -100,7 +100,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const peerRef = useRef<CallPeerInfo | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const tokenRef = useRef(session?.accessToken);
-  const notifyRef = useRef(notify);
+  const toastRef = useRef(toast);
   const notifiedCallIds = useRef<Set<string>>(new Set());
   const peerFetchSeq = useRef(0);
 
@@ -119,8 +119,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    notifyRef.current = notify;
-  }, [notify]);
+    toastRef.current = toast;
+  }, [toast]);
 
   useEffect(() => {
     tokenRef.current = session?.accessToken;
@@ -186,7 +186,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       });
       void ensurePeer(result.call, viewerId);
     } catch (e) {
-      notifyRef.current(`Could not restore the active call: ${messageOf(e)}`);
+      toastRef.current.error(`Could not restore the active call: ${messageOf(e)}`);
     }
   }, [ensurePeer, updateActiveCall]);
 
@@ -219,7 +219,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (call.calleeId !== userId) return;
       const current = activeCallRef.current;
       if (current && current.call.id !== call.id) {
-        notifyRef.current('Another incoming call could not be shown while a call is active.');
+        toastRef.current.warning('Another incoming call could not be shown while a call is active.');
         return;
       }
       if (current?.call.id === call.id && current.direction === 'INCOMING') {
@@ -254,7 +254,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
               });
             }
           })
-          .catch((e) => notifyRef.current(`Could not restore the accepted call: ${messageOf(e)}`));
+          .catch((e) => toastRef.current.error(`Could not restore the accepted call: ${messageOf(e)}`));
       }
     };
 
@@ -262,7 +262,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (activeCallRef.current?.call.id !== call.id) return;
       updateActiveCall(null);
       notifiedCallIds.current.delete(call.id);
-      notifyRef.current(TERMINAL_MESSAGES[call.status] || fallback);
+      toastRef.current.info(TERMINAL_MESSAGES[call.status] || fallback);
     };
     const onRejected = finishWith('The call was declined.');
     const onCancelled = finishWith('The call was cancelled.');
@@ -273,7 +273,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (activeCallRef.current?.call.id === call.id) {
         updateActiveCall(null);
       }
-      notifyRef.current(TERMINAL_MESSAGES.BUSY);
+      toastRef.current.warning(TERMINAL_MESSAGES.BUSY);
     };
 
     const onConnect = () => {
@@ -284,7 +284,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const onConnectError = () => setCallConnected(false);
     const onSessionExpired = () => {
       setCallConnected(false);
-      notifyRef.current('Live session expired. Reload to reconnect with a refreshed token.');
+      toastRef.current.warning('Live session expired. Reload to reconnect with a refreshed token.');
     };
 
     socket.on('connect', onConnect);
@@ -359,11 +359,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const startCall = useCallback(async ({ conversationId, type, peer: peerHint }: StartCallArgs) => {
     if (!socketRef.current?.connected) {
-      notify('Connect to live messaging before starting a call.');
+      toast.warning('Connect to live messaging before starting a call.');
       return;
     }
     if (activeCallRef.current) {
-      notify('You are already in a call.');
+      toast.warning('You are already in a call.');
       return;
     }
     try {
@@ -371,7 +371,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         body: { conversationId, type },
       });
       if (result.call.status === 'BUSY') {
-        notify(peerHint?.displayName ? `${peerHint.displayName} is busy right now.` : 'That member is busy right now.');
+        toast.warning(peerHint?.displayName ? `${peerHint.displayName} is busy right now.` : 'That member is busy right now.');
         return;
       }
       if (!result.credentials) throw new Error('The server did not return call credentials.');
@@ -379,16 +379,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
       updateActiveCall({ call: result.call, direction: 'OUTGOING', credentials: result.credentials });
       if (!peerHint && session?.userId) void ensurePeer(result.call, session.userId);
     } catch (e) {
-      notify(messageOf(e));
+      toast.error(messageOf(e));
     }
-  }, [ensurePeer, notify, session?.userId, setPeerInfo, updateActiveCall]);
+  }, [ensurePeer, toast, session?.userId, setPeerInfo, updateActiveCall]);
 
   const acceptCall = useCallback(async () => {
     await runAction(async () => {
       const current = activeCallRef.current;
       if (!current) return;
       if (session?.userId && current.call.calleeId !== session.userId) {
-        notify('Only the person being called can accept this call.');
+        toast.warning('Only the person being called can accept this call.');
         return;
       }
       try {
@@ -398,27 +398,27 @@ export function CallProvider({ children }: { children: ReactNode }) {
         );
         updateActiveCall({ ...current, call: result.call, credentials: result.credentials });
       } catch (e) {
-        notify(messageOf(e));
+        toast.error(messageOf(e));
       }
     });
-  }, [notify, runAction, session?.userId, updateActiveCall]);
+  }, [toast, runAction, session?.userId, updateActiveCall]);
 
   const rejectCall = useCallback(async () => {
     await runAction(async () => {
       const current = activeCallRef.current;
       if (!current) return;
       if (session?.userId && current.call.calleeId !== session.userId) {
-        notify('Only the person being called can reject this call.');
+        toast.warning('Only the person being called can reject this call.');
         return;
       }
       try {
         await request('POST', `/calls/${encodeURIComponent(current.call.id)}/reject`);
         updateActiveCall(null);
       } catch (e) {
-        notify(messageOf(e));
+        toast.error(messageOf(e));
       }
     });
-  }, [notify, runAction, session?.userId, updateActiveCall]);
+  }, [toast, runAction, session?.userId, updateActiveCall]);
 
   const cancelCall = useCallback(async () => {
     await runAction(async () => {
@@ -428,10 +428,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
         await request('POST', `/calls/${encodeURIComponent(current.call.id)}/cancel`);
         updateActiveCall(null);
       } catch (e) {
-        notify(messageOf(e));
+        toast.error(messageOf(e));
       }
     });
-  }, [notify, runAction, updateActiveCall]);
+  }, [toast, runAction, updateActiveCall]);
 
   const endCall = useCallback(async () => {
     await runAction(async () => {
@@ -441,10 +441,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
         await request('POST', `/calls/${encodeURIComponent(current.call.id)}/end`);
         updateActiveCall(null);
       } catch (e) {
-        notify(messageOf(e));
+        toast.error(messageOf(e));
       }
     });
-  }, [notify, runAction, updateActiveCall]);
+  }, [toast, runAction, updateActiveCall]);
 
   const value = useMemo<CallContextValue>(() => ({
     activeCall,

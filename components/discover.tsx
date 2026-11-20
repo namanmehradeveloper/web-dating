@@ -8,7 +8,7 @@ import { useApp } from './provider';
 import { useCall } from './call-provider';
 
 export function Discover({go}: {go:(path:string)=>void}) {
-  const {notify,me} = useApp();
+  const {toast,confirmAction,me} = useApp();
   const {callSocket} = useCall();
   const [profiles,setProfiles] = useState<Member[]>([]);
   const [busy,setBusy] = useState(false);
@@ -42,7 +42,7 @@ export function Discover({go}: {go:(path:string)=>void}) {
   const profile=profiles[0];
   const swipe=async(action:'LIKE'|'PASS'|'SUPER_LIKE')=>{
     if(!profile||busy) return;
-    if(profile.alreadySwiped){setProfiles(p=>p.slice(1));notify('Earlier swipe has already been recorded.');return;}
+    if(profile.alreadySwiped){setProfiles(p=>p.slice(1));toast.info('Earlier swipe has already been recorded.');return;}
     setBusy(true);
     try{const response=await request<{isMatch?:boolean;match?:Match}>('POST','/swipes',{body:{targetUserId:profile.id,action},idempotencyKey:uid()});
       setSwipeFeedback(action);
@@ -52,16 +52,26 @@ export function Discover({go}: {go:(path:string)=>void}) {
       }
       setHistory(h=>[...h,{profile,matched:Boolean(response?.isMatch)}]);setProfiles(p=>p.slice(1));setIdx(0);setSwipeFeedback(null);
       if(response?.isMatch&&response.match) setMatched(response.match);
-    }catch(e){setSwipeFeedback(null);notify(messageOf(e))}finally{setBusy(false)}
+    }catch(e){setSwipeFeedback(null);toast.error(messageOf(e))}finally{setBusy(false)}
   };
   const undo=async()=>{const last=history.at(-1);if(!last||last.matched)return;
     setBusy(true);
-    try{const restored=await request<{restoredProfile?:Member}>('POST','/swipes/undo');setProfiles(p=>[restored?.restoredProfile||last.profile,...p]);setHistory(h=>h.slice(0,-1));notify('Last swipe undone.');}
-    catch(e){notify(messageOf(e))}finally{setBusy(false)}
+    try{const restored=await request<{restoredProfile?:Member}>('POST','/swipes/undo');setProfiles(p=>[restored?.restoredProfile||last.profile,...p]);setHistory(h=>h.slice(0,-1));toast.success('Last swipe undone.');}
+    catch(e){toast.error(messageOf(e))}finally{setBusy(false)}
   };
-  const showDetails=async(member:Member)=>{setDetails(member);try{const full=await request<Member>('GET',`/profiles/${member.id}`);setDetails(full)}catch(e){notify(messageOf(e))}};
-  const reportUser=async()=>{if(!details)return;try{await request('POST','/reports',{body:{targetType:'USER',targetId:details.id,reason:reportReason,details:reportDetails||undefined,alsoBlock:true}});notify('Report submitted.');setReportOpen(false);setDetails(null);setProfiles(p=>p.filter(x=>x.id!==details.id));}catch(e){notify(messageOf(e))}};
-  const block=async()=>{if(!details||!confirm(`Block ${details.displayName}?`))return;try{await request('POST',`/users/${details.id}/block`);notify('Member blocked.');setProfiles(p=>p.filter(x=>x.id!==details.id));setDetails(null)}catch(e){notify(messageOf(e))}};
+  const showDetails=async(member:Member)=>{setDetails(member);try{const full=await request<Member>('GET',`/profiles/${member.id}`);setDetails(full)}catch(e){toast.error(messageOf(e))}};
+  const reportUser=async()=>{if(!details)return;try{await request('POST','/reports',{body:{targetType:'USER',targetId:details.id,reason:reportReason,details:reportDetails||undefined,alsoBlock:true}});toast.success('Report submitted.');setReportOpen(false);setDetails(null);setProfiles(p=>p.filter(x=>x.id!==details.id));}catch(e){toast.error(messageOf(e))}};
+  const block=async()=>{
+    if(!details)return;
+    const ok=await confirmAction({
+      title:`Block ${details.displayName}?`,
+      message:`You will no longer see each other on Dating Cloud.`,
+      confirmLabel:'Block member',
+      danger:true,
+    });
+    if(!ok)return;
+    try{await request('POST',`/users/${details.id}/block`);toast.success('Member blocked.');setProfiles(p=>p.filter(x=>x.id!==details.id));setDetails(null)}catch(e){toast.error(messageOf(e))}
+  };
   const photos=profile?.photos||[];
   return <div className="discover-page">
     <div className="page-heading"><div><span className="overline purple"><Sparkles size={14}/> YOUR NEXT CONNECTION</span><h1>Discover people<span className="title-dot">.</span></h1><p>Someone amazing could be one swipe away.</p></div><Button tone="outline" onClick={()=>setFilters(true)}><Settings2 size={16}/> Preferences</Button></div>
@@ -93,6 +103,6 @@ export function Discover({go}: {go:(path:string)=>void}) {
     {details&&!reportOpen&&<Modal title={`${details.displayName}'s profile`} onClose={()=>setDetails(null)}><div className="profile-modal-gallery">{details.photos?.map((p,i)=><img key={i} alt={`Profile photo ${i+1}`} src={mediaUrl(p.url)}/>)}</div><p>{details.bio||'No bio added.'}</p><p className="muted">{details.occupation||''} · {details.city||'Location private'}</p><div className="tag-line dark">{details.interests?.map(x=><span key={x}>{x}</span>)}</div><div className="setting-actions"><Button tone="outline" onClick={()=>setReportOpen(true)}>Report profile</Button><Button tone="danger" onClick={()=>void block()}>Block member</Button></div></Modal>}
     {reportOpen&&<Modal title="Report profile" onClose={()=>setReportOpen(false)}><div className="stack"><label>Reason<select value={reportReason} onChange={e=>setReportReason(e.target.value)}>{['FAKE_PROFILE','INAPPROPRIATE_PHOTOS','HARASSMENT','SPAM_OR_SCAM','UNDERAGE','OFFLINE_BEHAVIOUR','OTHER'].map(r=><option key={r} value={r}>{r.replaceAll('_',' ')}</option>)}</select></label><label>Additional details<textarea value={reportDetails} maxLength={1000} onChange={e=>setReportDetails(e.target.value)}/></label><p className="muted">Submitting a report also blocks this member.</p><Button tone="danger" onClick={()=>void reportUser()}>Submit report</Button></div></Modal>}
     {matched&&<Modal title="It's a match! 💗" onClose={()=>setMatched(null)}><div className="match-success v3-match-celebration"><div className="v3-confetti" aria-hidden="true">{Array.from({length:12},(_,i)=><span key={i}>♥</span>)}</div><Avatar user={matched.otherUser} size={104}/><h2>You and {matched.otherUser.displayName} like each other!</h2><p>Time to say hello.</p><Button onClick={()=>{setMatched(null);go(matched.conversationId?`/messages/${encodeURIComponent(matched.conversationId)}`:'/messages')}}>Go to messages <ArrowRight size={16}/></Button><Button tone="outline" onClick={()=>setMatched(null)}>Keep discovering</Button></div></Modal>}
-    {filters&&<Modal title="Discovery preferences" onClose={()=>setFilters(false)}><div className="form-grid"><label>Minimum age<input type="number" min={18} max={99} value={minAge} onChange={e=>setMinAge(e.target.value)}/></label><label>Maximum age<input type="number" min={18} max={99} value={maxAge} onChange={e=>setMaxAge(e.target.value)}/></label><label className="wide">Distance (km)<input type="number" min={1} max={500} value={distance} onChange={e=>setDistance(e.target.value)}/></label></div><Button className="full" onClick={()=>{if(!Number.isInteger(Number(minAge))||!Number.isInteger(Number(maxAge))||Number(minAge)<18||Number(maxAge)>99||Number(minAge)>Number(maxAge)){notify('Choose an age range between 18 and 99.');return;}if(!Number.isInteger(Number(distance))||Number(distance)<1||Number(distance)>500){notify('Distance must be between 1 and 500 km.');return;}setAppliedFilters({minAge,maxAge,distance});setFilters(false)}}>Apply filters</Button></Modal>}
+    {filters&&<Modal title="Discovery preferences" onClose={()=>setFilters(false)}><div className="form-grid"><label>Minimum age<input type="number" min={18} max={99} value={minAge} onChange={e=>setMinAge(e.target.value)}/></label><label>Maximum age<input type="number" min={18} max={99} value={maxAge} onChange={e=>setMaxAge(e.target.value)}/></label><label className="wide">Distance (km)<input type="number" min={1} max={500} value={distance} onChange={e=>setDistance(e.target.value)}/></label></div><Button className="full" onClick={()=>{if(!Number.isInteger(Number(minAge))||!Number.isInteger(Number(maxAge))||Number(minAge)<18||Number(maxAge)>99||Number(minAge)>Number(maxAge)){toast.warning('Choose an age range between 18 and 99.');return;}if(!Number.isInteger(Number(distance))||Number(distance)<1||Number(distance)>500){toast.warning('Distance must be between 1 and 500 km.');return;}setAppliedFilters({minAge,maxAge,distance});setFilters(false)}}>Apply filters</Button></Modal>}
   </div>;
 }

@@ -1,17 +1,48 @@
 'use client';
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { configureSession, request, messageOf, http } from '@/lib/api';
 import type { Session, Member } from '@/lib/types';
+import { Button, Modal } from './ui';
 
 export type MeStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type ToastTone = 'success' | 'error' | 'warning' | 'info';
+
+export type AppToast = {
+  id: number;
+  message: string;
+  tone: ToastTone;
+};
+
+export type ConfirmOptions = {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+};
+
+type ToastApi = {
+  success: (message: string) => void;
+  error: (message: string) => void;
+  warning: (message: string) => void;
+  info: (message: string) => void;
+};
 
 type AppContextType = {
-  session: Session | null; me: Member | null; meStatus: MeStatus; ready: boolean; reloadMe: () => Promise<void>;
-  signIn: (session: Session) => Promise<void>; signOut: (everywhere?: boolean) => Promise<void>;
-  notice: string; notify: (message: string) => void;
+  session: Session | null;
+  me: Member | null;
+  meStatus: MeStatus;
+  ready: boolean;
+  reloadMe: () => Promise<void>;
+  signIn: (session: Session) => Promise<void>;
+  signOut: (everywhere?: boolean) => Promise<void>;
+  toast: ToastApi;
+  confirmAction: (options: ConfirmOptions) => Promise<boolean>;
 };
+
 const Context = createContext<AppContextType | null>(null);
 const KEY = 'dating_cloud_web_session';
+const TOAST_MS = 5000;
 
 function parseSession(raw: string | null): Session | null {
   if (!raw) return null;
@@ -42,27 +73,69 @@ export function AppProvider({children}: {children: React.ReactNode}) {
   const [me, setMe] = useState<Member | null>(null);
   const [meStatus, setMeStatus] = useState<MeStatus>('idle');
   const [ready, setReady] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [toastState, setToastState] = useState<AppToast | null>(null);
+  const [confirmState, setConfirmState] = useState<(ConfirmOptions & { id: number }) | null>(null);
   const activeUser = useRef<string | null>(null);
-  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearNotice = useCallback(() => {
-    if (noticeTimer.current) {
-      clearTimeout(noticeTimer.current);
-      noticeTimer.current = null;
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastSeq = useRef(0);
+  const confirmSeq = useRef(0);
+  const confirmResolver = useRef<((value: boolean) => void) | null>(null);
+
+  const clearToast = useCallback(() => {
+    if (toastTimer.current) {
+      clearTimeout(toastTimer.current);
+      toastTimer.current = null;
     }
-    setNotice('');
+    setToastState(null);
   }, []);
-  const notify = useCallback((message: string) => {
-    setNotice(message);
-    if (noticeTimer.current) clearTimeout(noticeTimer.current);
-    noticeTimer.current = setTimeout(() => {
-      noticeTimer.current = null;
-      setNotice('');
-    }, 5000);
+
+  const showToast = useCallback((tone: ToastTone, message: string) => {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    toastSeq.current += 1;
+    setToastState({ id: toastSeq.current, message: trimmed, tone });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => {
+      toastTimer.current = null;
+      setToastState(null);
+    }, TOAST_MS);
   }, []);
+
+  const toast = useMemo<ToastApi>(() => ({
+    success: (message) => showToast('success', message),
+    error: (message) => showToast('error', message),
+    warning: (message) => showToast('warning', message),
+    info: (message) => showToast('info', message),
+  }), [showToast]);
+
+  const settleConfirm = useCallback((value: boolean) => {
+    const resolve = confirmResolver.current;
+    confirmResolver.current = null;
+    setConfirmState(null);
+    resolve?.(value);
+  }, []);
+
+  const confirmAction = useCallback((options: ConfirmOptions) => {
+    if (confirmResolver.current) {
+      confirmResolver.current(false);
+      confirmResolver.current = null;
+    }
+    confirmSeq.current += 1;
+    const id = confirmSeq.current;
+    setConfirmState({ ...options, id });
+    return new Promise<boolean>((resolve) => {
+      confirmResolver.current = resolve;
+    });
+  }, []);
+
   useEffect(() => () => {
-    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    if (confirmResolver.current) {
+      confirmResolver.current(false);
+      confirmResolver.current = null;
+    }
   }, []);
+
   const assign = useCallback((value: Session | null) => {
     const previousUser = activeUser.current;
     activeUser.current = value?.userId || null;
@@ -124,10 +197,10 @@ export function AppProvider({children}: {children: React.ReactNode}) {
       if (activeUser.current === expectedUser) {
         setMe(null);
         setMeStatus('error');
-        if ((e as { status?: number })?.status !== 401) notify(messageOf(e));
+        if ((e as { status?: number })?.status !== 401) toast.error(messageOf(e));
       }
     }
-  }, [session?.userId, notify]);
+  }, [session?.userId, toast]);
   useEffect(() => { if (ready && session) void reloadMe(); }, [ready, session?.userId, reloadMe]);
   const signIn = async (value: Session) => {
     configureSession(value, assign); assign(value);
@@ -142,7 +215,7 @@ export function AppProvider({children}: {children: React.ReactNode}) {
       if (activeUser.current === value.userId) {
         setMe(null);
         setMeStatus('error');
-        notify(messageOf(e));
+        toast.error(messageOf(e));
       }
     }
   };
@@ -157,9 +230,35 @@ export function AppProvider({children}: {children: React.ReactNode}) {
       });
     } catch { /* local session has already been cleared */ }
   };
-  return <Context.Provider value={{session, me, meStatus, ready, reloadMe, signIn, signOut, notice, notify}}>
+
+  return <Context.Provider value={{session, me, meStatus, ready, reloadMe, signIn, signOut, toast, confirmAction}}>
     {children}
-    {notice && <div className="toast" role="status"><span>{notice}</span><button aria-label="Dismiss notification" onClick={clearNotice}>×</button></div>}
+    {toastState && (
+      <div
+        className={`toast toast-${toastState.tone}`}
+        role={toastState.tone === 'error' || toastState.tone === 'warning' ? 'alert' : 'status'}
+        aria-live={toastState.tone === 'error' ? 'assertive' : 'polite'}
+      >
+        <span className="toast-message">{toastState.message}</span>
+        <button type="button" aria-label="Dismiss notification" onClick={clearToast}>×</button>
+      </div>
+    )}
+    {confirmState && (
+      <Modal title={confirmState.title} onClose={() => settleConfirm(false)}>
+        <p className="muted" style={{ marginBottom: 18 }}>{confirmState.message}</p>
+        <div className="setting-actions" style={{ justifyContent: 'flex-end' }}>
+          <Button tone="outline" onClick={() => settleConfirm(false)}>
+            {confirmState.cancelLabel || 'Cancel'}
+          </Button>
+          <Button
+            tone={confirmState.danger ? 'danger' : 'primary'}
+            onClick={() => settleConfirm(true)}
+          >
+            {confirmState.confirmLabel || 'Confirm'}
+          </Button>
+        </div>
+      </Modal>
+    )}
   </Context.Provider>;
 }
 export function useApp() { const ctx = useContext(Context); if (!ctx) throw new Error('Missing provider'); return ctx; }
