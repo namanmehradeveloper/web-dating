@@ -15,8 +15,8 @@ const targets = [
   '.v2-interior-section-heading','.v2-interior-cta-grid','.v2-faq-layout > div',
   '.v2-featured-card','.page-heading','.discovery-hero',
   '.aside-feature','.mini-advice','.person-tile','.person-row','.panel',
-  '.chat-layout','.v2-profile-hero','.dc-member-detail','.premium-hero','.price-card',
-  '.bottom-prompt','.auth-visual-copy','.auth-card','.onboarding-card',
+  '.chat-layout','.v2-profile-hero','.dc-member-detail','.premium-hero','.dc-premium .price-card',
+  '.dc-premium .notice-line','.bottom-prompt','.auth-visual-copy','.auth-card','.onboarding-card',
   '.dc-contact-hero','.dc-contact-inner > aside','.dc-contact-form',
   '.dc-footer-brand','.dc-footer-links'
 ].join(',');

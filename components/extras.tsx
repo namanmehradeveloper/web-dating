@@ -277,10 +277,19 @@ export function Premium(){
     finally{setBusyId('')}
   };
 
-  return <div>
+  return <div className="dc-premium">
     <Heading label="MORE WAYS TO CONNECT" title="Dating Cloud Plus" description="Unlock more possibilities with premium features."/>
-    <div className="premium-hero"><Crown size={32}/><span>ENJOY MORE CONNECTIONS</span><h2>Love the possibilities.</h2>
-      <p>{billing?.configured?`Payments run through the ${billing.provider||'configured'} provider. Demo charges are simulated and never real money.`:'Billing is not configured on this server yet.'}</p>
+    <div className="premium-hero">
+      <div className="premium-hero-copy">
+        <Crown size={28}/>
+        <span>ENJOY MORE CONNECTIONS</span>
+        <h2>Love the possibilities.</h2>
+        <p>{billing?.configured?`Payments run through the ${billing.provider||'configured'} provider. Demo charges are simulated and never real money.`:'Billing is not configured on this server yet.'}</p>
+      </div>
+      <div className="premium-hero-visual" aria-hidden="true">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/images/couple.jpg" alt=""/>
+      </div>
     </div>
     <div className="plan-grid">{plans.isPending&&!plans.data?<Loading/>:plans.isError?<p className="field-error">{messageOf(plans.error)}</p>:plans.data?.items.map(p=>{
       const yearly=String(p.period||'').toUpperCase()==='YEARLY'||/year/i.test(p.title||'');
@@ -289,7 +298,13 @@ export function Premium(){
         ?'Get all the benefits of Plus for a full year, with greater value and uninterrupted access.'
         :'Enjoy unlimited likes, discover who\'s interested in you, and undo your last swipe.';
       return (
-      <section key={p.id} className="price-card"><Crown size={23}/><h2>{title}</h2><p>{description}</p>
+      <section key={p.id} className={`price-card${yearly?' price-card-featured':''}`}>
+        <div className="price-card-top">
+          <span className="price-card-mark"><Crown size={18}/></span>
+          {yearly?<span className="price-card-tag">Best value</span>:null}
+        </div>
+        <h2>{title}</h2>
+        <p>{description}</p>
         <h3>{p.priceLabel||'See store price'}<small>{p.period?` / ${p.period.toLowerCase()}`:''}</small></h3>
         {billing?.configured&&billing.provider==='demo'?<div className="price-card-actions">
           <Button disabled={Boolean(busyId)} className="price-card-btn price-card-btn-primary" onClick={()=>void buy(p.id,'SUCCESS')}>
