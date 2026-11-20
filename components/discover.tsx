@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Bookmark, Heart, MapPin, RotateCcw, Settings2, ShieldCheck, Sparkles, Star, X, Info } from 'lucide-react';
 import { request, uid, messageOf, mediaUrl } from '@/lib/api';
+import { getDiscovery, invalidateDiscoveryCache } from '@/lib/discovery-cache';
 import type { Member, Match } from '@/lib/types';
 import { Badge, Button, Empty, Failure, Modal, Avatar } from './ui';
 import { useApp } from './provider';
@@ -26,7 +27,10 @@ export function Discover({go}: {go:(path:string)=>void}) {
   useEffect(()=>{if(!appliedFilters){setMinAge(String(me?.preferences?.minAge??18));setMaxAge(String(me?.preferences?.maxAge??99));setDistance(String(me?.preferences?.maxDistanceKm??50))}},[me?.preferences,appliedFilters]);
   const load=useCallback(async()=>{setLoading(true);setError('');try{
     const query=appliedFilters?`?${new URLSearchParams({minAge:appliedFilters.minAge,maxAge:appliedFilters.maxAge,distanceKm:appliedFilters.distance}).toString()}`:'';
-    const d=await request<{items:Member[]}>('GET',`/discovery${query}`);
+    // Filtered feeds always hit the network; default feed can reuse a short-lived shared cache.
+    const d=appliedFilters
+      ? await request<{items:Member[]}>('GET',`/discovery${query}`)
+      : await getDiscovery();
     setProfiles(d?.items||[]);setIdx(0);
   } catch(e){setError(messageOf(e))}finally{setLoading(false)}},[appliedFilters]);
   useEffect(()=>{void load()},[load]);
@@ -51,6 +55,7 @@ export function Discover({go}: {go:(path:string)=>void}) {
         await new Promise<void>(resolve=>window.setTimeout(resolve,290));
       }
       setHistory(h=>[...h,{profile,matched:Boolean(response?.isMatch)}]);setProfiles(p=>p.slice(1));setIdx(0);setSwipeFeedback(null);
+      invalidateDiscoveryCache();
       if(response?.isMatch&&response.match) setMatched(response.match);
     }catch(e){setSwipeFeedback(null);toast.error(messageOf(e))}finally{setBusy(false)}
   };

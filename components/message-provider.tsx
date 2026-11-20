@@ -52,6 +52,9 @@ type MessageContextValue = {
   markConversationRead: (conversationId: string) => void;
   refreshUnreadFromServer: () => Promise<void>;
   refreshInboxUnread: () => Promise<void>;
+  notificationPrefs: Record<string, boolean> | null;
+  notificationPrefsLoading: boolean;
+  refreshNotificationPrefs: () => Promise<void>;
   openNotificationDestination: (notification: InboxNotification) => Promise<void>;
 };
 
@@ -132,6 +135,8 @@ export function MessageProvider({ children }: { children: ReactNode }) {
   const [soundMuted, setSoundMutedState] = useState(false);
   const [activeConversationId, setActiveConversationIdState] = useState<string | null>(null);
   const [toast, setToast] = useState<MessageToast | null>(null);
+  const [notificationPrefs, setNotificationPrefs] = useState<Record<string, boolean> | null>(null);
+  const [notificationPrefsLoading, setNotificationPrefsLoading] = useState(false);
 
   const activeConversationIdRef = useRef<string | null>(null);
   const toastRef = useRef<MessageToast | null>(null);
@@ -291,6 +296,8 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Full conversation list sync — only for session start / reconnect / structural chat changes.
+  // Incoming messages update badges locally to avoid GET /conversations?limit=50 on every message.
   const refreshUnreadFromServer = useCallback(async () => {
     if (!session?.userId) return;
     try {
@@ -315,15 +322,30 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     }
   }, [session?.userId]);
 
+  const refreshNotificationPrefs = useCallback(async () => {
+    if (!session?.userId) return;
+    setNotificationPrefsLoading(true);
+    try {
+      const prefs = await request<Record<string, boolean>>('GET', '/notification-preferences');
+      setNotificationPrefs(prefs);
+      messagesPrefEnabledRef.current = prefs.messages !== false;
+    } catch {
+      messagesPrefEnabledRef.current = true;
+    } finally {
+      setNotificationPrefsLoading(false);
+    }
+  }, [session?.userId]);
+
   useEffect(() => {
     refreshInboxUnreadRef.current = refreshInboxUnread;
   }, [refreshInboxUnread]);
 
-  // Load prefs + unread when signed in.
+  // Load prefs + unread when signed in (once per user — not on every navigation).
   useEffect(() => {
     if (!session?.userId) {
       setUnreadByConversation({});
       setInboxUnread(0);
+      setNotificationPrefs(null);
       setToast(null);
       notifiedMessageIds.current.clear();
       notifiedInboxIds.current.clear();
@@ -333,20 +355,8 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     }
     void refreshUnreadFromServer();
     void refreshInboxUnread();
-    void request<Record<string, boolean>>('GET', '/notification-preferences')
-      .then((prefs) => {
-        messagesPrefEnabledRef.current = prefs.messages !== false;
-      })
-      .catch(() => {
-        messagesPrefEnabledRef.current = true;
-      });
-  }, [session?.userId, refreshUnreadFromServer, refreshInboxUnread, setActiveConversationId]);
-
-  // Refresh inbox badge when navigating to notifications.
-  useEffect(() => {
-    if (!session?.userId) return;
-    if (pathname.startsWith('/notifications')) void refreshInboxUnread();
-  }, [pathname, session?.userId, refreshInboxUnread]);
+    void refreshNotificationPrefs();
+  }, [session?.userId, refreshUnreadFromServer, refreshInboxUnread, refreshNotificationPrefs, setActiveConversationId]);
 
   const handleIncomingMessage = useCallback(async (message: ChatMessage, viewerId: string) => {
     if (!message?.id || !message.conversationId) return;
@@ -374,10 +384,8 @@ export function MessageProvider({ children }: { children: ReactNode }) {
       }));
     }
 
-    // Sync badges from the server so a restored (previously deleted) conversation's unread is accurate.
-    void refreshUnreadFromServer();
-
     // Suppress popup/sound when the open thread is already on screen, prefs are off, or we already notified.
+    // Badge counts update locally above — no full /conversations refetch per message.
     if (viewingThis || alreadyNotified || !messagesPrefEnabledRef.current) return;
 
     const preview = messagePreview(message);
@@ -404,7 +412,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
       `dc-msg-${message.conversationId}`,
       () => openHref(href),
     );
-    void refreshInboxUnread();
+    // Inbox badge is for notification rows; message toasts do not require unread-count refetch.
 
     if (!cached) {
       const sender = await resolveSender(message.senderId);
@@ -415,7 +423,7 @@ export function MessageProvider({ children }: { children: ReactNode }) {
           : current
       ));
     }
-  }, [openHref, playSound, refreshInboxUnread, refreshUnreadFromServer, showToast]);
+  }, [openHref, playSound, showToast]);
 
   const handleInboxNotification = useCallback((notification: InboxNotification) => {
     if (!notification?.id) return;
@@ -542,6 +550,9 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     markConversationRead,
     refreshUnreadFromServer,
     refreshInboxUnread,
+    notificationPrefs,
+    notificationPrefsLoading,
+    refreshNotificationPrefs,
     openNotificationDestination,
   }), [
     unreadTotal,
@@ -554,6 +565,9 @@ export function MessageProvider({ children }: { children: ReactNode }) {
     markConversationRead,
     refreshUnreadFromServer,
     refreshInboxUnread,
+    notificationPrefs,
+    notificationPrefsLoading,
+    refreshNotificationPrefs,
     openNotificationDestination,
   ]);
 

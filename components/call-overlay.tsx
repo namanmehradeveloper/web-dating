@@ -1,14 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type AgoraRTCType from 'agora-rtc-sdk-ng';
 import type { Socket } from 'socket.io-client';
-import { Lottie } from 'lottie-react';
 import {
   Camera, CameraOff, Gift, Mic, MicOff, MoreHorizontal, Phone, PhoneOff,
   Plus, Sparkles, SwitchCamera, X, Coins,
 } from 'lucide-react';
+
+const Lottie = lazy(() => import('lottie-react').then((m) => ({ default: m.Lottie })));
 import { ApiFailure, mediaUrl, messageOf, request } from '@/lib/api';
 import type { StoreItem, StoreWallet } from '@/lib/types';
 import {
@@ -673,7 +674,9 @@ export function CallOverlay({
                 <p><strong>{fx.fromName}</strong> sent you a {fx.gift.title} {fx.gift.emoji || ''}</p>
               </div>
               <div className="call-gift-lottie">
-                <Lottie src={GIFT_BURST_LOTTIE as unknown as object} autoplay loop={false} />
+                <Suspense fallback={null}>
+                  <Lottie src={GIFT_BURST_LOTTIE as unknown as object} autoplay loop={false} />
+                </Suspense>
                 <span className="call-gift-lottie-emoji" aria-hidden>{fx.gift.emoji || '🎁'}</span>
               </div>
             </div>

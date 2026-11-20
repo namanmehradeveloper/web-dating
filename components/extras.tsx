@@ -33,7 +33,15 @@ export function Notifications(){
   const {toast}=useApp();
   const searchParams=useSearchParams();
   const focusId=searchParams.get('focus');
-  const {refreshInboxUnread,soundMuted,setSoundMuted,openNotificationDestination}=useMessages();
+  const {
+    refreshInboxUnread,
+    soundMuted,
+    setSoundMuted,
+    openNotificationDestination,
+    notificationPrefs,
+    notificationPrefsLoading,
+    refreshNotificationPrefs,
+  }=useMessages();
   const [items,setItems]=useState<Notification[]>([]);
   const [nextCursor,setNextCursor]=useState<string|null>(null);
   const [loading,setLoading]=useState(true);
@@ -42,7 +50,6 @@ export function Notifications(){
   const [filter,setFilter]=useState<NotifFilter>('all');
   const [typeFilter,setTypeFilter]=useState<NotifTypeFilter>('ALL');
   const [busyAll,setBusyAll]=useState(false);
-  const prefs=useGet<Record<string,boolean>>('/notification-preferences');
 
   const load=useCallback(async(cursor?:string|null)=>{
     const isMore=Boolean(cursor);
@@ -58,12 +65,22 @@ export function Notifications(){
 
   useEffect(()=>{void load()},[load]);
   useEffect(()=>{
+    // One refresh when opening the notifications page (not on every global pathname change).
+    void refreshInboxUnread();
+    if(!notificationPrefs) void refreshNotificationPrefs();
+  },[refreshInboxUnread, refreshNotificationPrefs, notificationPrefs]);
+  useEffect(()=>{
     const onFocus=()=>{if(document.visibilityState==='visible')void refreshInboxUnread()};
     document.addEventListener('visibilitychange',onFocus);
     return()=>document.removeEventListener('visibilitychange',onFocus);
   },[refreshInboxUnread]);
 
-  const change=async(key:string,v:boolean)=>{try{await request('PATCH','/notification-preferences',{body:{[key]:v}});void prefs.refresh()}catch(e){toast.error(messageOf(e))}};
+  const change=async(key:string,v:boolean)=>{
+    try{
+      await request('PATCH','/notification-preferences',{body:{[key]:v}});
+      await refreshNotificationPrefs();
+    }catch(e){toast.error(messageOf(e))}
+  };
 
   const openNotification=async(n:Notification)=>{
     await openNotificationDestination(n);
@@ -149,7 +166,7 @@ export function Notifications(){
           )}
         </>:<Empty title={filter==='unread'?'No unread notifications':'All caught up'} detail="Your notifications will appear here."/>}
       </Panel>
-      <Panel title="Notification preferences" subtitle="Choose which updates to receive.">{prefs.loading?<Loading/>:['newMatches','messages','likes','promotions'].map(k=><label key={k} className="setting-row"><span><strong>{({newMatches:'New matches',messages:'Messages',likes:'Likes',promotions:'Offers and updates'} as Record<string,string>)[k]}</strong></span><input type="checkbox" checked={Boolean(prefs.data?.[k])} onChange={e=>void change(k,e.target.checked)} disabled={!prefs.data}/></label>)}
+      <Panel title="Notification preferences" subtitle="Choose which updates to receive.">{notificationPrefsLoading&&!notificationPrefs?<Loading/>:['newMatches','messages','likes','promotions'].map(k=><label key={k} className="setting-row"><span><strong>{({newMatches:'New matches',messages:'Messages',likes:'Likes',promotions:'Offers and updates'} as Record<string,string>)[k]}</strong></span><input type="checkbox" checked={Boolean(notificationPrefs?.[k])} onChange={e=>void change(k,e.target.checked)} disabled={!notificationPrefs}/></label>)}
         <label className="setting-row"><span><strong>Message sounds (this browser)</strong></span><input type="checkbox" checked={!soundMuted} onChange={e=>setSoundMuted(!e.target.checked)}/></label>
       </Panel>
     </div>

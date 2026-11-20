@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Gift, Coins, Smile, Sparkles } from 'lucide-react';
 import { request, messageOf, mediaUrl } from '@/lib/api';
 import type { StoreItem, StoreWallet } from '@/lib/types';
@@ -22,10 +22,14 @@ export function Store() {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
   const [pending, setPending] = useState<PendingPurchase | null>(null);
+  const hasCatalog = useRef(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError('');
+  const refresh = useCallback(async (opts?: { quiet?: boolean }) => {
+    const quiet = Boolean(opts?.quiet) && hasCatalog.current;
+    if (!quiet) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const [cat, wal] = await Promise.all([
         request<{ coinPacks: StoreItem[]; emojiPacks: StoreItem[]; gifts: StoreItem[] }>('GET', '/store/catalog'),
@@ -33,12 +37,15 @@ export function Store() {
       ]);
       setCatalog(cat);
       setWallet(wal);
+      hasCatalog.current = true;
+      if (quiet) setError('');
     } catch (e) {
-      setError(messageOf(e));
+      if (!quiet) setError(messageOf(e));
+      else toast.error(messageOf(e));
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     void refresh();
@@ -61,7 +68,7 @@ export function Store() {
       } else {
         toast.error('Payment failed. No coins were added.');
       }
-      await refresh();
+      await refresh({ quiet: true });
     } catch (e) {
       toast.error(messageOf(e));
     } finally {
@@ -77,7 +84,7 @@ export function Store() {
       });
       setWallet(result.wallet);
       toast.success('Added to your inventory.');
-      await refresh();
+      await refresh({ quiet: true });
     } catch (e) {
       toast.error(messageOf(e));
     } finally {

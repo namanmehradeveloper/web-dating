@@ -193,7 +193,7 @@ function isGroupedWith(prev: ChatMessage | undefined, current: ChatMessage) {
 export function Chat({ go }: { go: (p: string) => void }) {
   const { session, toast, confirmAction } = useApp();
   const { activeCall, callConnected, callSocket, startCall: placeCall } = useCall();
-  const { setActiveConversationId, markConversationRead, refreshUnreadFromServer } = useMessages();
+  const { setActiveConversationId, markConversationRead } = useMessages();
   const pathname = usePathname();
   const query = useSearchParams();
   const pathConversation = pathname.match(/^\/messages\/([^/?#]+)/)?.[1] || null;
@@ -242,7 +242,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
   const prevMessageCount = useRef(0);
   const toastRef = useRef(toast);
   const loadRef = useRef<(showLoader?: boolean) => Promise<Conversation[]>>(async () => []);
-  const refreshUnreadRef = useRef(refreshUnreadFromServer);
   const goRef = useRef(go);
   const tokenRef = useRef(session?.accessToken);
   const everConnected = useRef(false);
@@ -285,7 +284,6 @@ export function Chat({ go }: { go: (p: string) => void }) {
 
   useEffect(() => { toastRef.current = toast; }, [toast]);
   useEffect(() => { goRef.current = go; }, [go]);
-  useEffect(() => { refreshUnreadRef.current = refreshUnreadFromServer; }, [refreshUnreadFromServer]);
   useEffect(() => {
     tokenRef.current = session?.accessToken;
     const socket = socketRef.current;
@@ -463,8 +461,8 @@ export function Chat({ go }: { go: (p: string) => void }) {
         }
       }
       void (async () => {
+        // Quiet list refresh only — message badges update locally in MessageProvider.
         const items = await loadRef.current(false);
-        void refreshUnreadRef.current();
         if (items.some((conversation) => conversation.id === message.conversationId)) return;
         try {
           const summary = await request<Conversation>(

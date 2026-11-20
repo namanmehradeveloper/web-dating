@@ -42,7 +42,7 @@ export function Logo({ inverse = false }: { inverse?: boolean }) {
 
 export function SiteHeader() {
   const { session, me, signOut } = useApp();
-  const { unreadTotal, inboxUnread, refreshInboxUnread } = useMessages();
+  const { unreadTotal, inboxUnread } = useMessages();
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -76,11 +76,7 @@ export function SiteHeader() {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [account]);
 
-  // Keep inbox badge in sync when navigating between member pages
-  useEffect(() => {
-    if (!session) return;
-    void refreshInboxUnread();
-  }, [session, pathname, refreshInboxUnread]);
+  // Inbox badge is refreshed on sign-in, socket connect, and notification events — not on every route change.
 
   // Mobile menu keyboard and resize listeners (guests only)
   useEffect(() => {

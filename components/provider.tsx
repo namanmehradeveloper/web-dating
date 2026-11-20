@@ -201,23 +201,11 @@ export function AppProvider({children}: {children: React.ReactNode}) {
       }
     }
   }, [session?.userId, toast]);
+  // Single path for /profile/me — session restore and sign-in both land here (no duplicate fetch in signIn).
   useEffect(() => { if (ready && session) void reloadMe(); }, [ready, session?.userId, reloadMe]);
   const signIn = async (value: Session) => {
-    configureSession(value, assign); assign(value);
-    setMeStatus('loading');
-    try {
-      const profile = await request<Member>('GET', '/profile/me');
-      if (activeUser.current === value.userId) {
-        setMe(profile);
-        setMeStatus('ready');
-      }
-    } catch (e) {
-      if (activeUser.current === value.userId) {
-        setMe(null);
-        setMeStatus('error');
-        toast.error(messageOf(e));
-      }
-    }
+    configureSession(value, assign);
+    assign(value);
   };
   const signOut = async (everywhere = false) => {
     const previous=session;

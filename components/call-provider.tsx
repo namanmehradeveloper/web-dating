@@ -2,6 +2,8 @@
 
 import {
   createContext,
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -14,12 +16,11 @@ import { io, type Socket } from 'socket.io-client';
 import { mediaUrl, messageOf, request } from '@/lib/api';
 import type { Member } from '@/lib/types';
 import { useApp } from './provider';
-import {
-  CallOverlay,
-  type ActiveCall,
-  type AgoraCredentials,
-  type CallInfo,
-} from './call-overlay';
+import type { ActiveCall, AgoraCredentials, CallInfo } from './call-overlay';
+
+const CallOverlay = lazy(() =>
+  import('./call-overlay').then((m) => ({ default: m.CallOverlay })),
+);
 
 export type CallPeerInfo = {
   displayName: string;
@@ -474,17 +475,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
     <CallContext.Provider value={value}>
       {children}
       {activeCall && (
-        <CallOverlay
-          activeCall={activeCall}
-          peerName={peer?.displayName || 'Dating Cloud member'}
-          peerPhotoUrl={peer?.photoUrl}
-          currentUserId={session?.userId}
-          socket={callSocket}
-          onAccept={acceptCall}
-          onReject={rejectCall}
-          onCancel={cancelCall}
-          onEnd={endCall}
-        />
+        <Suspense fallback={null}>
+          <CallOverlay
+            activeCall={activeCall}
+            peerName={peer?.displayName || 'Dating Cloud member'}
+            peerPhotoUrl={peer?.photoUrl}
+            currentUserId={session?.userId}
+            socket={callSocket}
+            onAccept={acceptCall}
+            onReject={rejectCall}
+            onCancel={cancelCall}
+            onEnd={endCall}
+          />
+        </Suspense>
       )}
     </CallContext.Provider>
   );

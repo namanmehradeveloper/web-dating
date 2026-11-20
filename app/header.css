@@ -719,3 +719,24 @@ body.dc-msg-route .dc-header-messages .dc-header-inner {
   color: #f0e4ea !important;
   font-weight: 450 !important;
 }
+
+/* Member shell status (profile load / errors) — keeps page chrome instead of a blank full-screen wait */
+.dc-inline-status {
+  max-width: 420px;
+  margin: 48px auto;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.dc-inline-status h2 {
+  font-size: 22px;
+}
+.dc-inline-status p {
+  color: var(--v5-muted, #706870);
+  font-size: 14px;
+}
+.auth-redirecting .auth-card {
+  margin: 80px auto;
+}
